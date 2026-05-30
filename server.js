@@ -1,9 +1,12 @@
 /**
- * BraainHot — Server v4
+ * BraainHot — Server v5
  * Servidor Único Autorizativo (Máximo 20 jogadores)
  * Aguarda 3 jogadores para iniciar Aquecimento de 60 segundos.
  * Após o Aquecimento, inicia Partida de 7 minutos.
- * Reinicia automaticamente ao fim de jogo.
+ * Com Arma para Corredores (3 tiros seguidos, 5s recarga, reduz velocidade e empurra).
+ * Sangue do Hot (100 HP, 3 hits paralisam por 10s).
+ * Limite de Arrasto de Caixas (5s de tether max, recarrega solto).
+ * Bate-papo por sessão e painel de jogadores.
  */
 const express = require('express');
 const http = require('http');
@@ -192,7 +195,22 @@ function broadcast(msg) {
 }
 
 function serializePlayer(p) {
-  return { id: p.id, name: p.name, x: p.x, y: p.y, isHot: p.isHot, alive: p.alive, color: p.color };
+  return {
+    id: p.id,
+    name: p.name,
+    x: p.x,
+    y: p.y,
+    isHot: p.isHot,
+    alive: p.alive,
+    color: p.color,
+    ammo: p.ammo,
+    reloadTimer: p.reloadTimer,
+    health: p.health,
+    isStunned: p.isStunned,
+    stunTimer: p.stunTimer,
+    speedDebuffTimer: p.speedDebuffTimer,
+    holdEnergy: p.holdEnergy,
+  };
 }
 
 function getMapData() {
@@ -215,8 +233,11 @@ function startInGame() {
   const ids = [...players.keys()];
   const hotId = ids[Math.floor(Math.random() * ids.length)];
   const hotPlayer = players.get(hotId);
-  hotPlayer.isHot = true;
-  hotPlayer.speed = HOT_SPEED;
+  if (hotPlayer) {
+    hotPlayer.isHot = true;
+    hotPlayer.speed = HOT_SPEED;
+    hotPlayer.health = 100;
+  }
   broadcast({ type: 'phaseChange', phase: Phase.INGAME, timer: GAME_SECS, hotAlphaId: hotId });
 }
 
@@ -236,6 +257,15 @@ function resetGame() {
     p.x = spawn.x; p.y = spawn.y;
     p.isHot = false; p.speed = RUNNER_SPEED; p.alive = true;
     p.grabbedBox = null; p.mouseWorld = null;
+
+    // Reset de armas e mecânicas
+    p.ammo = 3;
+    p.reloadTimer = 0;
+    p.health = 100;
+    p.isStunned = false;
+    p.stunTimer = 0;
+    p.speedDebuffTimer = 0;
+    p.holdEnergy = 300;
   }
   broadcast({ type: 'phaseChange', phase: Phase.LOBBY, timer: 0, map: getMapData() });
 
@@ -289,6 +319,15 @@ wss.on('connection', (ws) => {
         input: { up: false, down: false, left: false, right: false },
         grabbedBox: null,
         mouseWorld: null,
+
+        // --- Novas mecânicas da v5 ---
+        ammo: 3,
+        reloadTimer: 0,
+        health: 100,
+        isStunned: false,
+        stunTimer: 0,
+        speedDebuffTimer: 0,
+        holdEnergy: 300,
       };
 
       players.set(pId, currentPlayer);
@@ -321,8 +360,165 @@ wss.on('connection', (ws) => {
       currentPlayer.input.right = !!msg.right;
     }
 
+    // ── ATIRAR COM ARMA (Mecânica v5) ──
+    if (msg.type === 'shoot') {
+      if (currentPlayer.isHot) return; // Apenas corredores atiram
+      if (currentPlayer.isStunned) return;
+      if (currentPlayer.reloadTimer > 0) return;
+      if (currentPlayer.ammo <= 0) return;
+
+      currentPlayer.ammo--;
+      if (currentPlayer.ammo <= 0) {
+        currentPlayer.reloadTimer = 5 * TICK_RATE; // 5 segundos de recarga
+      }
+
+      const px = currentPlayer.x + PLAYER_SIZE / 2;
+      const py = currentPlayer.y + PLAYER_SIZE / 2;
+      const tx = msg.tx;
+      const ty = msg.ty;
+
+      let dx = tx - px;
+      let dy = ty - py;
+      let len = Math.sqrt(dx * dx + dy * dy);
+      
+      if (len >= 1) {
+        const maxRange = 600;
+        if (len > maxRange) {
+          dx = (dx / len) * maxRange;
+          dy = (dy / len) * maxRange;
+          len = maxRange;
+        }
+
+        const ux = dx / len;
+        const uy = dy / len;
+
+        let finalEx = px + dx;
+        let finalEy = py + dy;
+        let hitType = null;
+        let hitTargetId = null;
+
+        // Percorre o raio em passos curtos (5px)
+        const step = 5;
+        for (let d = 0; d < len; d += step) {
+          const rx = px + ux * d;
+          const ry = py + uy * d;
+
+          // 1. Colisão com paredes
+          if (collidesWithWalls(rx - 1, ry - 1, 2, 2)) {
+            finalEx = rx;
+            finalEy = ry;
+            hitType = 'wall';
+            break;
+          }
+
+          // 2. Colisão com caixas (arrasta um pouco)
+          let boxHit = null;
+          for (const b of pushables) {
+            if (rx >= b.x && rx <= b.x + b.w && ry >= b.y && ry <= b.y + b.h) {
+              boxHit = b;
+              break;
+            }
+          }
+          if (boxHit) {
+            finalEx = rx;
+            finalEy = ry;
+            hitType = 'box';
+            hitTargetId = boxHit.id;
+
+            // Arrasta a caixa 30px na direção do tiro
+            const pushDist = 35;
+            const targetBoxX = boxHit.x + ux * pushDist;
+            const targetBoxY = boxHit.y + uy * pushDist;
+            if (!collidesWithWalls(targetBoxX, boxHit.y, boxHit.w, boxHit.h) &&
+                !collidesWithBoxes(targetBoxX, boxHit.y, boxHit.w, boxHit.h, boxHit.id)) {
+              boxHit.x = targetBoxX;
+            }
+            if (!collidesWithWalls(boxHit.x, targetBoxY, boxHit.w, boxHit.h) &&
+                !collidesWithBoxes(boxHit.x, targetBoxY, boxHit.w, boxHit.h, boxHit.id)) {
+              boxHit.y = targetBoxY;
+            }
+            break;
+          }
+
+          // 3. Colisão com outros jogadores
+          let playerHit = null;
+          for (const [id, p2] of players) {
+            if (id === currentPlayer.id) continue;
+            const cx2 = p2.x + PLAYER_SIZE / 2;
+            const cy2 = p2.y + PLAYER_SIZE / 2;
+            const distToPlayer = Math.sqrt((rx - cx2) * (rx - cx2) + (ry - cy2) * (ry - cy2));
+            if (distToPlayer < PLAYER_SIZE / 2 + 2) {
+              playerHit = p2;
+              break;
+            }
+          }
+          if (playerHit) {
+            finalEx = rx;
+            finalEy = ry;
+            hitType = 'player';
+            hitTargetId = playerHit.id;
+
+            // Arrasta o jogador atingido por 30px
+            const pushDist = 30;
+            const targetPX = playerHit.x + ux * pushDist;
+            const targetPY = playerHit.y + uy * pushDist;
+            if (!collidesWithWalls(targetPX, playerHit.y, playerHit.w, playerHit.h) &&
+                !collidesWithBoxes(targetPX, playerHit.y, playerHit.w, playerHit.h, -1)) {
+              playerHit.x = targetPX;
+            }
+            if (!collidesWithWalls(playerHit.x, targetPY, playerHit.w, playerHit.h) &&
+                !collidesWithBoxes(playerHit.x, targetPY, playerHit.w, playerHit.h, -1)) {
+              playerHit.y = targetPY;
+            }
+
+            // Reduz velocidade por 0.5s (30 ticks)
+            playerHit.speedDebuffTimer = 30;
+
+            // Se for Pegador, perde sangue. 3 tiros (34 HP cada) zeram e paralisam
+            if (playerHit.isHot && !playerHit.isStunned) {
+              playerHit.health -= 34;
+              if (playerHit.health <= 0) {
+                playerHit.health = 0;
+                playerHit.isStunned = true;
+                playerHit.stunTimer = 10 * TICK_RATE; // Paralisado por 10s
+                broadcast({ type: 'stunned', playerId: playerHit.id, name: playerHit.name });
+              }
+            }
+            break;
+          }
+        }
+
+        // Envia feixe de laser para o cliente renderizar
+        broadcast({
+          type: 'bulletTraced',
+          shooterId: currentPlayer.id,
+          sx: px, sy: py,
+          ex: finalEx, ey: finalEy,
+          hitType,
+          color: currentPlayer.color
+        });
+      }
+    }
+
+    // ── BATE-PAPO (Mecânica v5) ──
+    if (msg.type === 'chat') {
+      const text = (msg.text || '').slice(0, 80).trim();
+      if (text) {
+        broadcast({
+          type: 'chat',
+          playerId: currentPlayer.id,
+          name: currentPlayer.name,
+          color: currentPlayer.color,
+          text,
+        });
+      }
+    }
+
     if (msg.type === 'grab') {
       if (currentPlayer.grabbedBox) return;
+      // Não pode pegar se a energia estiver recarregando
+      if (currentPlayer.holdEnergy <= 30) return; 
+
       const box = pushables.find(b => b.id === msg.boxId);
       if (!box || box.grabbedBy) return;
       const dx = (currentPlayer.x + currentPlayer.w / 2) - (box.x + box.w / 2);
@@ -374,8 +570,52 @@ function gameTick() {
     }
   }
 
+  // ── Atualizar Estados Temporais de Jogadores ──
+  for (const [, p] of players) {
+    // 1. Recarga da arma (5s)
+    if (p.reloadTimer > 0) {
+      p.reloadTimer--;
+      if (p.reloadTimer === 0) {
+        p.ammo = 3;
+      }
+    }
+
+    // 2. Paralisado/Stunned (Hot com 0 de HP)
+    if (p.isStunned) {
+      p.stunTimer--;
+      if (p.stunTimer <= 0) {
+        p.isStunned = false;
+        p.health = 100; // Recupera totalmente o sangue
+      }
+    }
+
+    // 3. Debuff de velocidade por tiro (0.5s)
+    if (p.speedDebuffTimer > 0) {
+      p.speedDebuffTimer--;
+    }
+
+    // 4. Limite de segurar objeto (5 segundos = 300 ticks)
+    if (p.grabbedBox !== null) {
+      p.holdEnergy--;
+      if (p.holdEnergy <= 0) {
+        p.holdEnergy = 0;
+        // Solta a caixa automaticamente!
+        const box = pushables.find(b => b.id === p.grabbedBox);
+        if (box) box.grabbedBy = null;
+        p.grabbedBox = null;
+        p.mouseWorld = null;
+      }
+    } else {
+      if (p.holdEnergy < 300) {
+        p.holdEnergy++; // Recarrega na mesma velocidade
+      }
+    }
+  }
+
   // ── Mover Jogadores (Livre em LOBBY, WARMUP e INGAME) ──
   for (const [, p] of players) {
+    if (p.isStunned) continue; // Paralisado não se move!
+
     let dx = 0, dy = 0;
     if (p.input.up) dy -= 1;
     if (p.input.down) dy += 1;
@@ -391,6 +631,11 @@ function gameTick() {
       if (pcx > zone.x && pcx < zone.x + zone.w && pcy > zone.y && pcy < zone.y + zone.h) {
         speed *= zone.type === 'boost' ? (p.isHot ? 0.75 : 1.35) : (p.isHot ? 1.35 : 0.75);
       }
+    }
+
+    // Debuff de velocidade por tiro (redução de 50%)
+    if (p.speedDebuffTimer > 0) {
+      speed *= 0.5;
     }
 
     // Mover X
@@ -448,9 +693,9 @@ function gameTick() {
     }
   }
 
-  // ── Infecção (Apenas em Partida InGame!) ──
+  // ── Infecção (Apenas em Partida InGame e Hots não Stunned!) ──
   if (gamePhase === Phase.INGAME) {
-    const hots = [...players.values()].filter(p => p.isHot);
+    const hots = [...players.values()].filter(p => p.isHot && !p.isStunned);
     const runners = [...players.values()].filter(p => !p.isHot);
     for (const hot of hots) {
       for (const runner of runners) {
@@ -459,6 +704,7 @@ function gameTick() {
         if (Math.sqrt(dx * dx + dy * dy) < INFECTION_RADIUS) {
           runner.isHot = true;
           runner.speed = HOT_SPEED;
+          runner.health = 100; // Preenche vida
           broadcast({
             type: 'infected',
             playerId: runner.id,
@@ -489,5 +735,5 @@ function gameTick() {
 setInterval(gameTick, TICK_MS);
 
 server.listen(PORT, () => {
-  console.log(`\n  ⚡ Servidor Único BraainHot v4 rodando em http://localhost:${PORT}\n`);
+  console.log(`\n  ⚡ Servidor Único BraainHot v5 rodando em http://localhost:${PORT}\n`);
 });

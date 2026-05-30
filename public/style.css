@@ -165,3 +165,145 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg-d
 }
 .leave-btn:hover { background: var(--neon-red); color: #000; box-shadow: 0 0 12px rgba(255,34,68,0.4); transform: translateY(-1px); }
 
+/* ── PAINEL DE JOGADORES (v5) ── */
+.player-list-panel {
+  position: fixed; top: 80px; right: 20px; width: 220px;
+  background: var(--glass-bg); border: 1px solid var(--glass-border);
+  border-radius: var(--radius); z-index: 52; backdrop-filter: blur(12px);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.5); display: flex; flex-direction: column;
+}
+.panel-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 8px 12px; border-bottom: 1px solid var(--glass-border);
+  font-family: var(--font-display); font-size: 0.7rem; letter-spacing: 1.5px;
+  color: var(--neon-cyan); font-weight: 700;
+}
+.toggle-panel-btn {
+  background: transparent; border: none; color: var(--neon-cyan);
+  font-family: var(--font-display); font-size: 0.7rem; cursor: pointer;
+  padding: 2px 6px; outline: none; transition: opacity 0.2s;
+}
+.toggle-panel-btn:hover { opacity: 0.8; }
+.panel-content {
+  padding: 8px; max-height: 250px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 6px; transition: max-height 0.25s ease-out;
+}
+.player-list-panel.collapsed .panel-content {
+  max-height: 0px !important; padding: 0px !important; overflow: hidden;
+}
+.player-row {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 6px 8px; border-radius: 6px; background: rgba(0,0,0,0.3);
+  border: 1px solid rgba(255,255,255,0.03);
+}
+.player-row-top {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 0.85rem; font-weight: 600;
+}
+.player-row-name {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 110px;
+}
+.player-row-status {
+  font-size: 0.7rem; font-family: var(--font-display); font-weight: bold;
+}
+.status-tag-runner { color: var(--neon-cyan); }
+.status-tag-hot { color: var(--neon-red); }
+.status-tag-stunned { color: var(--neon-purple); animation: textFlicker 1s infinite alternate; }
+.hp-bar-outer {
+  width: 100%; height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden;
+}
+.hp-bar-inner {
+  height: 100%; background: linear-gradient(90deg, var(--neon-red), #ff6600);
+  box-shadow: 0 0 8px rgba(255,34,68,0.5); transition: width 0.2s;
+}
+
+/* ── HUD DE ARMAS & ENERGIA (v5) ── */
+.weapon-hud {
+  position: fixed; bottom: 20px; left: 20px; width: 260px;
+  background: var(--glass-bg); border: 1px solid var(--glass-border);
+  border-radius: var(--radius); padding: 14px 18px; z-index: 52;
+  backdrop-filter: blur(12px); box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+  display: flex; flex-direction: column; gap: 12px; pointer-events: auto;
+}
+.stat-row {
+  display: flex; flex-direction: column; gap: 6px;
+}
+.stat-label {
+  font-family: var(--font-display); font-size: 0.65rem; letter-spacing: 1.5px;
+  color: var(--neon-cyan); font-weight: bold;
+}
+.bar-container {
+  width: 100%; height: 8px; background: rgba(0,0,0,0.5);
+  border: 1px solid rgba(0,240,255,0.15); border-radius: 4px; overflow: hidden;
+}
+.bar-fill {
+  height: 100%; transition: width 0.1s linear, background-color 0.2s;
+}
+.energy-fill {
+  background: linear-gradient(90deg, var(--neon-cyan), var(--neon-green));
+  box-shadow: 0 0 10px rgba(0,240,255,0.4);
+}
+.energy-fill.low {
+  background: linear-gradient(90deg, var(--neon-red), var(--neon-orange));
+  box-shadow: 0 0 10px rgba(255,34,68,0.5);
+}
+.ammo-container {
+  display: flex; gap: 8px; margin-top: 2px;
+}
+.ammo-tick {
+  width: 22px; height: 12px; background: rgba(0,0,0,0.5);
+  border: 1px solid rgba(0,240,255,0.3); border-radius: 2px;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+.ammo-tick.active {
+  background: var(--neon-cyan);
+  box-shadow: 0 0 8px var(--neon-cyan);
+  border-color: #fff;
+}
+.reload-alert {
+  font-family: var(--font-display); font-size: 0.75rem; letter-spacing: 2px;
+  color: var(--neon-red); font-weight: 900; text-align: center;
+  animation: urgentPulse 0.6s infinite alternate; margin-top: 4px;
+}
+
+/* ── BATE-PAPO (v5) ── */
+.chat-area {
+  position: fixed; bottom: 20px; left: 300px; width: 300px; height: 180px;
+  background: var(--glass-bg); border: 1px solid var(--glass-border);
+  border-radius: var(--radius); z-index: 52; backdrop-filter: blur(12px);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.5); display: flex; flex-direction: column;
+  pointer-events: auto; overflow: hidden;
+}
+.chat-messages {
+  flex: 1; padding: 10px; overflow-y: auto; display: flex;
+  flex-direction: column; gap: 6px; font-size: 0.85rem; font-weight: 500;
+}
+.chat-msg-row {
+  line-height: 1.3; overflow-wrap: break-word; word-break: break-all;
+}
+.chat-msg-name {
+  font-weight: 700; font-family: var(--font-body);
+}
+.chat-msg-text {
+  color: #eee;
+}
+.chat-input-row {
+  padding: 6px 10px; border-top: 1px solid var(--glass-border);
+  background: rgba(0,0,0,0.4);
+}
+.chat-input-row input {
+  width: 100%; padding: 6px 12px; background: rgba(0,0,0,0.6);
+  border: 1px solid rgba(0,240,255,0.15); border-radius: 6px;
+  color: #fff; font-family: var(--font-body); font-size: 0.9rem;
+  outline: none; transition: border-color 0.2s, box-shadow 0.2s;
+}
+.chat-input-row input:focus {
+  border-color: var(--neon-cyan); box-shadow: 0 0 10px rgba(0,240,255,0.2);
+}
+
+@keyframes textFlicker {
+  0% { opacity: 0.8; }
+  100% { opacity: 1; }
+}
+
+

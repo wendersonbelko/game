@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>BraainHot — Neon Tag Multiplayer</title>
-  <meta name="description" content="BraainHot: jogo multiplayer de pega-pega neon cyberpunk.">
+  <meta name="description" content="BraainHot: jogo multiplayer de pega-pega neon cyberpunk com lasers e armas.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@400;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
@@ -33,17 +33,17 @@
         <div class="instr-card">
           <span class="instr-icon">🏃</span>
           <h4>Corredores</h4>
-          <p>Aqueça por 60s. Depois, fuja!</p>
+          <p>Aqueça por 60s. Defenda-se com a arma neon!</p>
         </div>
         <div class="instr-card hot-card">
           <span class="instr-icon">🔥</span>
           <h4>Hot</h4>
-          <p>Toque e infecte todos em 7 min!</p>
+          <p>Drene a vida do Hot para paralisá-lo por 10s!</p>
         </div>
         <div class="instr-card">
           <span class="instr-icon">📦</span>
           <h4>Caixas</h4>
-          <p>Clique e arraste para bloquear!</p>
+          <p>Arraste por até 5s. Laser descarrega ao segurar!</p>
         </div>
       </div>
     </div>
@@ -65,6 +65,38 @@
     </div>
     <div id="hudFeed"></div>
     <div id="grabHint" class="hidden">🖱️ Segure o mouse para arrastar a caixa</div>
+  </div>
+
+  <!-- ARMAS & ENERGIA HUD (Novo na v5) -->
+  <div id="weaponHud" class="weapon-hud hidden">
+    <div class="stat-row">
+      <span class="stat-label">⚡ FORÇA DO TETHER (ARRASTO)</span>
+      <div class="bar-container">
+        <div id="energyBar" class="bar-fill energy-fill"></div>
+      </div>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">🔫 ARMA NEON</span>
+      <div id="ammoContainer" class="ammo-container"></div>
+    </div>
+    <div id="reloadAlert" class="reload-alert hidden">RECARREGANDO (5s)...</div>
+  </div>
+
+  <!-- PAINEL DE JOGADORES (Novo na v5) -->
+  <div id="playerListPanel" class="player-list-panel hidden">
+    <div class="panel-header">
+      <span>🌐 ARENA ACTIVES</span>
+      <button id="togglePlayerListBtn" class="toggle-panel-btn">[-]</button>
+    </div>
+    <div id="playerListContent" class="panel-content"></div>
+  </div>
+
+  <!-- BATE-PAPO (Novo na v5) -->
+  <div id="chatArea" class="chat-area hidden">
+    <div id="chatMessages" class="chat-messages"></div>
+    <div class="chat-input-row">
+      <input type="text" id="chatInput" maxlength="80" placeholder="Pressione [ENTER] para conversar..." autocomplete="off">
+    </div>
   </div>
 
   <!-- FIM DE JOGO -->

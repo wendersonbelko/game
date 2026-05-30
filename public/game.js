@@ -1,8 +1,10 @@
 /**
- * BraainHot v4 — Client Engine
+ * BraainHot v5 — Client Engine
  * Servidor Único Autorizativo (Máximo 20 jogadores)
- * Aguarda 3 jogadores para iniciar Aquecimento de 60 segundos.
- * Após o Aquecimento, inicia Partida de 7 minutos.
+ * Com Arma para Corredores (3 tiros seguidos, 5s recarga, reduz velocidade e empurra).
+ * Sangue do Hot (100 HP, 3 hits paralisam por 10s).
+ * Limite de Arrasto de Caixas (5s de tether max, recarrega solto).
+ * Bate-papo por sessão e painel de jogadores.
  */
 
 // ── DOM ──
@@ -25,6 +27,20 @@ const hotSelectName = document.getElementById('hotSelectName');
 const colorPickerEl = document.getElementById('colorPicker');
 const grabHint = document.getElementById('grabHint');
 
+// HUD v5
+const weaponHud = document.getElementById('weaponHud');
+const energyBar = document.getElementById('energyBar');
+const ammoContainer = document.getElementById('ammoContainer');
+const reloadAlert = document.getElementById('reloadAlert');
+
+const playerListPanel = document.getElementById('playerListPanel');
+const togglePlayerListBtn = document.getElementById('togglePlayerListBtn');
+const playerListContent = document.getElementById('playerListContent');
+
+const chatArea = document.getElementById('chatArea');
+const chatMessages = document.getElementById('chatMessages');
+const chatInput = document.getElementById('chatInput');
+
 // ── Estado ──
 let ws = null, myId = null, gameMap = null;
 let players = new Map();
@@ -33,6 +49,7 @@ let phase = 'lobby', timer = 0, runnersCount = 0, hotsCount = 0;
 let joined = false;
 let camX = 0, camY = 0, shakeX = 0, shakeY = 0, shakeMag = 0;
 let particles = [];
+let laserBeams = []; // Linhas de laser estéticas `{ sx, sy, ex, ey, life, maxLife, color }`
 const targetPos = new Map();
 const keys = { up: false, down: false, left: false, right: false };
 let lastInputJson = '';
@@ -41,11 +58,14 @@ let lastInputJson = '';
 const defaultColors = ['#00f0ff','#00ff88','#aa66ff','#ff66cc','#ffcc00','#ff8844','#66ffcc','#88aaff'];
 let selectedColor = defaultColors[0];
 
-// Mouse / Drag
+// Mouse / Drag / Shoot
 let mouseScreenX = 0, mouseScreenY = 0;
 let mouseDown = false;
 let grabbedBoxId = null;
 let hoveringBoxId = null;
+
+// Roster state
+let isRosterCollapsed = false;
 
 // ── Resize ──
 function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
@@ -70,26 +90,67 @@ function initColorPicker() {
 }
 initColorPicker();
 
-// ── Input ──
-const keyMap = { ArrowUp:'up', ArrowDown:'down', ArrowLeft:'left', ArrowRight:'right', w:'up', W:'up', s:'down', S:'down', a:'left', A:'left', d:'right', D:'right' };
+// ── Roster Collapse/Expand ──
+togglePlayerListBtn.addEventListener('click', () => {
+  isRosterCollapsed = !isRosterCollapsed;
+  if (isRosterCollapsed) {
+    playerListPanel.classList.add('collapsed');
+    togglePlayerListBtn.textContent = '[+]';
+  } else {
+    playerListPanel.classList.remove('collapsed');
+    togglePlayerListBtn.textContent = '[-]';
+  }
+});
 
+// ── Chat Key Interceptions ──
 window.addEventListener('keydown', e => {
-  if (document.activeElement === nameInput) return;
-  const k = keyMap[e.key]; if (k) { keys[k] = true; e.preventDefault(); }
+  // Pressionar ENTER foca o input de chat ou envia mensagem
+  if (e.key === 'Enter') {
+    if (document.activeElement === chatInput) {
+      const txt = chatInput.value.trim();
+      if (txt && ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'chat', text: txt }));
+      }
+      chatInput.value = '';
+      chatInput.blur();
+    } else if (joined && document.activeElement !== nameInput) {
+      chatInput.focus();
+      e.preventDefault();
+    }
+  }
+
+  // Ignora movimento se estiver digitando em inputs
+  if (document.activeElement === nameInput || document.activeElement === chatInput) return;
+
+  const k = keyMap[e.key];
+  if (k) { keys[k] = true; e.preventDefault(); }
 });
 
 window.addEventListener('keyup', e => {
-  if (document.activeElement === nameInput) return;
-  const k = keyMap[e.key]; if (k) { keys[k] = false; e.preventDefault(); }
+  if (document.activeElement === nameInput || document.activeElement === chatInput) return;
+  const k = keyMap[e.key];
+  if (k) { keys[k] = false; e.preventDefault(); }
 });
+
+const keyMap = {
+  ArrowUp:'up', ArrowDown:'down', ArrowLeft:'left', ArrowRight:'right',
+  w:'up', W:'up', s:'down', S:'down', a:'left', A:'left', d:'right', D:'right'
+};
 
 function sendInput() {
   if (!ws || ws.readyState !== 1 || !joined) return;
+  // Se chat estiver focado, zera inputs de andar
+  if (document.activeElement === chatInput) {
+    keys.up = keys.down = keys.left = keys.right = false;
+  }
   const json = JSON.stringify(keys);
-  if (json !== lastInputJson) { ws.send(JSON.stringify({ type: 'input', ...keys })); lastInputJson = json; }
+  if (json !== lastInputJson) {
+    ws.send(JSON.stringify({ type: 'input', ...keys }));
+    lastInputJson = json;
+  }
 }
 
-// ── Mouse ──
+// ── Mouse & Shoot (v5) ──
 canvas.addEventListener('mousemove', e => {
   mouseScreenX = e.clientX;
   mouseScreenY = e.clientY;
@@ -98,6 +159,7 @@ canvas.addEventListener('mousemove', e => {
     const wy = mouseScreenY + camY - shakeY;
     ws.send(JSON.stringify({ type: 'drag', x: wx, y: wy }));
   }
+
   // Hover detection
   if (!mouseDown) {
     const wx = mouseScreenX + camX;
@@ -118,16 +180,33 @@ canvas.addEventListener('mousedown', e => {
   mouseDown = true;
   const wx = mouseScreenX + camX;
   const wy = mouseScreenY + camY;
-  // Tentar pegar uma caixa
+
+  // 1. Tentar arrastar caixa
+  let clickedBox = false;
   for (const b of pushables) {
     if (wx >= b.x && wx <= b.x + b.w && wy >= b.y && wy <= b.y + b.h) {
-      if (ws && ws.readyState === 1) {
-        ws.send(JSON.stringify({ type: 'grab', boxId: b.id }));
-        grabbedBoxId = b.id;
-        canvas.classList.add('grabbing');
-        grabHint.classList.remove('hidden');
+      const me = players.get(myId);
+      // Se não for Hot e tiver energia mínima
+      if (me && !me.isHot && me.holdEnergy > 30) {
+        if (ws && ws.readyState === 1) {
+          ws.send(JSON.stringify({ type: 'grab', boxId: b.id }));
+          grabbedBoxId = b.id;
+          canvas.classList.add('grabbing');
+          grabHint.classList.remove('hidden');
+        }
       }
+      clickedBox = true;
       break;
+    }
+  }
+
+  // 2. Se não clicou em caixa, atira com arma neon!
+  if (!clickedBox) {
+    const me = players.get(myId);
+    if (me && !me.isHot && me.reloadTimer === 0 && me.ammo > 0) {
+      if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'shoot', tx: wx, ty: wy }));
+      }
     }
   }
 });
@@ -183,7 +262,7 @@ function handleMessage(msg) {
         targetPos.set(sp.id, { x: sp.x, y: sp.y });
         const ex = players.get(sp.id);
         if (ex) {
-          ex.isHot = sp.isHot; ex.name = sp.name; ex.alive = sp.alive; ex.color = sp.color;
+          Object.assign(ex, sp); // Copia todas as novas mecânicas (ammo, health, energy)
         } else {
           players.set(sp.id, { ...sp });
         }
@@ -192,6 +271,8 @@ function handleMessage(msg) {
         if (!ids.has(id)) { players.delete(id); targetPos.delete(id); }
       }
       updateHUD();
+      updateWeaponHud();
+      updatePlayerList();
       break;
 
     case 'phaseChange':
@@ -206,10 +287,12 @@ function handleMessage(msg) {
     case 'playerJoined':
       players.set(msg.player.id, msg.player);
       targetPos.set(msg.player.id, { x: msg.player.x, y: msg.player.y });
+      updatePlayerList();
       break;
 
     case 'playerLeft':
       players.delete(msg.id); targetPos.delete(msg.id);
+      updatePlayerList();
       break;
 
     case 'infected':
@@ -217,6 +300,29 @@ function handleMessage(msg) {
       shakeMag = 10;
       const inf = players.get(msg.playerId);
       if (inf) spawnInfectionBurst(inf.x, inf.y);
+      break;
+
+    case 'stunned':
+      addFeedItem(`⚡ ${msg.name} (HOT) foi PARALISADO por 10 segundos!`);
+      shakeMag = 14;
+      const st = players.get(msg.playerId);
+      if (st) spawnStunBurst(st.x, st.y);
+      break;
+
+    case 'bulletTraced':
+      // Adiciona linha de laser neon de disparo
+      laserBeams.push({
+        sx: msg.sx, sy: msg.sy,
+        ex: msg.ex, ey: msg.ey,
+        life: 18, maxLife: 18,
+        color: msg.color || '#00f0ff'
+      });
+      // Partículas no ponto de impacto
+      spawnImpactSpark(msg.ex, msg.ey, msg.color || '#00f0ff');
+      break;
+
+    case 'chat':
+      appendChatMessage(msg.name, msg.color, msg.text);
       break;
 
     case 'gameOver':
@@ -229,35 +335,28 @@ function handleMessage(msg) {
   }
 }
 
-// ── Entrar na Arena ──
-joinBtn.addEventListener('click', doJoin);
-nameInput.addEventListener('keydown', e => { if (e.key === 'Enter') doJoin(); });
-
-function doJoin() {
-  const name = nameInput.value.trim() || 'Anon';
-  if (!ws || ws.readyState !== 1) return;
-  ws.send(JSON.stringify({
-    type: 'join',
-    name,
-    color: selectedColor
-  }));
-}
-
 // ── UI Screens ──
 function showGame() {
   lobbyEl.style.display = 'none';
   canvas.style.display = 'block';
   hudEl.classList.remove('hidden');
+  weaponHud.classList.remove('hidden');
+  playerListPanel.classList.remove('hidden');
+  chatArea.classList.remove('hidden');
   endScreen.classList.add('hidden');
   hotSelectScreen.classList.add('hidden');
   joined = true;
   updateHUD();
+  chatMessages.innerHTML = ''; // Limpa mensagens anteriores
 }
 
 function showLobbyScreen() {
   lobbyEl.style.display = 'flex';
   canvas.style.display = 'none';
   hudEl.classList.add('hidden');
+  weaponHud.classList.add('hidden');
+  playerListPanel.classList.add('hidden');
+  chatArea.classList.add('hidden');
   endScreen.classList.add('hidden');
   hotSelectScreen.classList.add('hidden');
   joined = false;
@@ -275,7 +374,6 @@ function updateHUD() {
   }
 
   const m = Math.floor(timer / 60), s = timer % 60;
-  
   if (phase === 'lobby') {
     hudTimer.textContent = '--:--';
   } else {
@@ -285,6 +383,113 @@ function updateHUD() {
   hudTimer.className = (phase === 'ingame' && timer <= 20) ? 'urgent' : '';
   hudRunners.textContent = `🏃 ${runnersCount}`;
   hudHots.textContent = `🔥 ${hotsCount}`;
+}
+
+// ── Atualização do Weapon HUD (v5) ──
+function updateWeaponHud() {
+  const me = players.get(myId);
+  if (!me) return;
+
+  // 1. Mostrar/Ocultar HUD dependendo se sou Hot ou não
+  if (me.isHot) {
+    weaponHud.classList.add('hidden');
+    return;
+  }
+  weaponHud.classList.remove('hidden');
+
+  // 2. Tether Energy Bar (0-300 ticks)
+  const energyPercent = (me.holdEnergy / 300) * 100;
+  energyBar.style.width = `${energyPercent}%`;
+  if (energyPercent < 20) {
+    energyBar.classList.add('low');
+  } else {
+    energyBar.classList.remove('low');
+  }
+
+  // 3. Ammo ticks (3 ticks)
+  ammoContainer.innerHTML = '';
+  for (let i = 0; i < 3; i++) {
+    const tick = document.createElement('div');
+    tick.className = 'ammo-tick' + (i < me.ammo ? ' active' : '');
+    ammoContainer.appendChild(tick);
+  }
+
+  // 4. Reload indicator
+  if (me.reloadTimer > 0) {
+    reloadAlert.classList.remove('hidden');
+  } else {
+    reloadAlert.classList.add('hidden');
+  }
+}
+
+// ── Lista de Jogadores Dinâmica (v5) ──
+function updatePlayerList() {
+  if (!joined) return;
+  playerListContent.innerHTML = '';
+
+  for (const [, p] of players) {
+    const row = document.createElement('div');
+    row.className = 'player-row';
+
+    const top = document.createElement('div');
+    top.className = 'player-row-top';
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'player-row-name';
+    nameSpan.style.color = p.color;
+    nameSpan.textContent = p.name + (p.id === myId ? ' (Você)' : '');
+    top.appendChild(nameSpan);
+
+    const statusSpan = document.createElement('span');
+    statusSpan.className = 'player-row-status';
+    if (p.isStunned) {
+      statusSpan.textContent = '⚡ REINICIANDO';
+      statusSpan.className += ' status-tag-stunned';
+    } else if (p.isHot) {
+      statusSpan.textContent = '🔥 PEGADOR';
+      statusSpan.className += ' status-tag-hot';
+    } else {
+      statusSpan.textContent = '🏃 CORREDOR';
+      statusSpan.className += ' status-tag-runner';
+    }
+    top.appendChild(statusSpan);
+    row.appendChild(top);
+
+    // Se for Hot, exibe sua barra de vida (HP)
+    if (p.isHot) {
+      const barOuter = document.createElement('div');
+      barOuter.className = 'hp-bar-outer';
+      const barInner = document.createElement('div');
+      barInner.className = 'hp-bar-inner';
+      barInner.style.width = `${p.health || 0}%`;
+      barOuter.appendChild(barInner);
+      row.appendChild(barOuter);
+    }
+
+    playerListContent.appendChild(row);
+  }
+}
+
+// ── Bate-Papo por Sessão (v5) ──
+function appendChatMessage(name, color, text) {
+  const row = document.createElement('div');
+  row.className = 'chat-msg-row';
+
+  const nameSpan = document.createElement('span');
+  nameSpan.className = 'chat-msg-name';
+  nameSpan.style.color = color || '#00f0ff';
+  nameSpan.textContent = `${name}: `;
+
+  const textSpan = document.createElement('span');
+  textSpan.className = 'chat-msg-text';
+  textSpan.textContent = text;
+
+  row.appendChild(nameSpan);
+  row.appendChild(textSpan);
+  chatMessages.appendChild(row);
+
+  // Auto scroll para o rodapé
+  chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
 function addFeedItem(text) {
@@ -309,7 +514,7 @@ function showEndScreen(w) {
   endMessage.textContent = w === 'runners' ? 'O tempo acabou! Pelo menos um corredor sobreviveu!' : 'Todos foram infectados!';
 }
 
-// ── Particles ──
+// ── Particles & Lasers ──
 function spawnParticle(x, y, color, life, speed, size) {
   const a = Math.random() * Math.PI * 2;
   particles.push({ x, y, vx: Math.cos(a) * Math.random() * speed, vy: Math.sin(a) * Math.random() * speed - 1.5, life, maxLife: life, color, size: size || 3 });
@@ -317,14 +522,32 @@ function spawnParticle(x, y, color, life, speed, size) {
 function spawnInfectionBurst(x, y) {
   for (let i = 0; i < 25; i++) spawnParticle(x + 14, y + 14, `hsl(${10+Math.random()*30},100%,${50+Math.random()*30}%)`, 35 + Math.random() * 25, 4, 3 + Math.random() * 3);
 }
+function spawnStunBurst(x, y) {
+  for (let i = 0; i < 35; i++) spawnParticle(x + 14, y + 14, `hsl(280,100%,${60+Math.random()*20}%)`, 45 + Math.random() * 35, 6, 2.5 + Math.random() * 3);
+}
+function spawnImpactSpark(x, y, color) {
+  for (let i = 0; i < 8; i++) spawnParticle(x, y, color, 15 + Math.random() * 15, 3, 1.5 + Math.random() * 1.5);
+}
 function spawnHotTrail(x, y) {
   if (Math.random() > 0.4) return;
   spawnParticle(x + 14 + (Math.random()-0.5)*10, y + 14, `hsl(${Math.random()*40},100%,${50+Math.random()*30}%)`, 12 + Math.random() * 12, 0.8, 2 + Math.random() * 2);
 }
+function spawnStunTrail(x, y) {
+  if (Math.random() > 0.3) return;
+  spawnParticle(x + 14 + (Math.random()-0.5)*10, y + 14, `hsl(280,100%,70%)`, 15 + Math.random() * 15, 0.5, 2 + Math.random() * 2);
+}
+
 function updateParticles() {
   for (let i = particles.length - 1; i >= 0; i--) {
     const p = particles[i]; p.x += p.vx; p.y += p.vy; p.vy += 0.05; p.life--;
     if (p.life <= 0) particles.splice(i, 1);
+  }
+
+  // Atualizar lasers estéticos
+  for (let i = laserBeams.length - 1; i >= 0; i--) {
+    const b = laserBeams[i];
+    b.life--;
+    if (b.life <= 0) laserBeams.splice(i, 1);
   }
 }
 
@@ -368,9 +591,29 @@ function render() {
   drawTethers();
   drawBoxes3D();
   drawPlayers();
+  drawLasers();
   drawParticles();
   ctx.restore();
   drawMinimap();
+}
+
+function drawLasers() {
+  for (const b of laserBeams) {
+    ctx.save();
+    ctx.strokeStyle = b.color;
+    ctx.lineWidth = 4 * (b.life / b.maxLife);
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = b.color;
+    ctx.beginPath();
+    ctx.moveTo(b.sx, b.sy);
+    ctx.lineTo(b.ex, b.ey);
+    ctx.stroke();
+
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1 * (b.life / b.maxLife);
+    ctx.stroke();
+    ctx.restore();
+  }
 }
 
 function drawTethers() {
@@ -526,11 +769,15 @@ function drawPlayers() {
     const sz = 28;
     const cx = p.x + sz/2, cy = p.y + sz/2;
 
-    if (p.isHot) spawnHotTrail(p.x, p.y);
+    if (p.isHot && !p.isStunned) spawnHotTrail(p.x, p.y);
+    if (p.isStunned) spawnStunTrail(p.x, p.y);
 
     ctx.save();
 
-    if (p.isHot) {
+    if (p.isStunned) {
+      ctx.shadowColor = 'rgba(136,68,255,0.75)';
+      ctx.shadowBlur = 18 + Math.sin(Date.now() / 150) * 6;
+    } else if (p.isHot) {
       ctx.shadowColor = 'rgba(255,34,68,0.6)';
       ctx.shadowBlur = 18 + Math.sin(Date.now() / 200) * 5;
     } else {
@@ -541,7 +788,13 @@ function drawPlayers() {
     ctx.beginPath();
     ctx.arc(cx, cy, sz/2, 0, Math.PI * 2);
 
-    if (p.isHot) {
+    if (p.isStunned) {
+      const grad = ctx.createRadialGradient(cx, cy, 2, cx, cy, sz/2);
+      grad.addColorStop(0, '#ffffff');
+      grad.addColorStop(0.5, '#aa66ff');
+      grad.addColorStop(1, '#4400aa');
+      ctx.fillStyle = grad;
+    } else if (p.isHot) {
       const grad = ctx.createRadialGradient(cx, cy, 2, cx, cy, sz/2);
       grad.addColorStop(0, '#ffcc00');
       grad.addColorStop(0.5, '#ff4400');
@@ -558,14 +811,23 @@ function drawPlayers() {
     ctx.fill();
 
     ctx.lineWidth = isMe ? 2.5 : 1.5;
-    ctx.strokeStyle = isMe ? '#ffffff' : (p.isHot ? '#ff6644' : (p.color || '#44ccff'));
+    ctx.strokeStyle = isMe ? '#ffffff' : (p.isStunned ? '#aa66ff' : (p.isHot ? '#ff6644' : (p.color || '#44ccff')));
     ctx.stroke();
     ctx.restore();
 
-    ctx.fillStyle = p.isHot ? '#ff8866' : (p.color || '#88ddff');
+    // Nome
+    ctx.fillStyle = p.isStunned ? '#ccaaff' : (p.isHot ? '#ff8866' : (p.color || '#88ddff'));
     ctx.font = 'bold 11px Rajdhani';
     ctx.textAlign = 'center';
     ctx.fillText(p.name, cx, p.y - 8);
+
+    // Stunned tag regressiva
+    if (p.isStunned && p.stunTimer > 0) {
+      const remainingSecs = Math.ceil(p.stunTimer / 60);
+      ctx.fillStyle = '#ff2244';
+      ctx.font = '9px Orbitron';
+      ctx.fillText(`⚡ PARALISADO (${remainingSecs}s)`, cx, p.y - 20);
+    }
 
     if (isMe) {
       ctx.strokeStyle = 'rgba(255,255,255,0.5)';
@@ -620,7 +882,7 @@ function drawMinimap() {
   }
 
   for (const [id, p] of players) {
-    ctx.fillStyle = id === myId ? '#ffffff' : (p.isHot ? '#ff2244' : (p.color || '#00f0ff'));
+    ctx.fillStyle = id === myId ? '#ffffff' : (p.isStunned ? '#aa66ff' : (p.isHot ? '#ff2244' : (p.color || '#00f0ff')));
     ctx.fillRect(mx + p.x * sx - 1, my + p.y * sy - 1, 3, 3);
   }
 
