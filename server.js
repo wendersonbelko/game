@@ -1,12 +1,15 @@
 /**
- * BraainHot — Server v5
+ * BraainHot — Server v6
  * Servidor Único Autorizativo (Máximo 20 jogadores)
  * Aguarda 3 jogadores para iniciar Aquecimento de 60 segundos.
  * Após o Aquecimento, inicia Partida de 7 minutos.
  * Com Arma para Corredores (3 tiros seguidos, 5s recarga, reduz velocidade e empurra).
  * Sangue do Hot (100 HP, 3 hits paralisam por 10s).
- * Limite de Arrasto de Caixas (5s de tether max, recarrega solto).
+ * Limite de Arrasto de Caixas (5s de tether max, recarrega solto, Hots recarregam 2x mais rápido).
  * Bate-papo por sessão e painel de jogadores.
+ * 
+ * NOVO NA V6:
+ * Sistema de Drop de Itens Cyberpunk Aleatórios (Metralhadora Burst, Escudo de Plasma, Supernova, Aura Gravitacional, Super Velocidade).
  */
 const express = require('express');
 const http = require('http');
@@ -46,6 +49,12 @@ let phaseTimer = 0;
 let tickCount = 0;
 let winner = null;
 let nextPlayerId = 1;
+
+// Itens Drops v6
+let pickups = [];
+let nextPickupId = 1;
+const PICKUP_SPAWN_INTERVAL = 15 * TICK_RATE; // a cada 15 segundos
+let pickupSpawnTimer = PICKUP_SPAWN_INTERVAL;
 
 // ─── Geração do Mapa ───
 function addWall(x, y, w, h) {
@@ -210,6 +219,13 @@ function serializePlayer(p) {
     stunTimer: p.stunTimer,
     speedDebuffTimer: p.speedDebuffTimer,
     holdEnergy: p.holdEnergy,
+
+    // Buffs v6
+    speedBoostTimer: p.speedBoostTimer,
+    machinegunTimer: p.machinegunTimer,
+    shieldTimer: p.shieldTimer,
+    supernovaTimer: p.supernovaTimer,
+    gravityTimer: p.gravityTimer,
   };
 }
 
@@ -251,6 +267,8 @@ function endGame(win) {
 function resetGame() {
   gamePhase = Phase.LOBBY;
   phaseTimer = 0; winner = null;
+  pickups = [];
+  pickupSpawnTimer = PICKUP_SPAWN_INTERVAL;
   generateMap();
   for (const [, p] of players) {
     const spawn = findSpawnPos();
@@ -266,6 +284,13 @@ function resetGame() {
     p.stunTimer = 0;
     p.speedDebuffTimer = 0;
     p.holdEnergy = 300;
+
+    // Reset Buffs v6
+    p.speedBoostTimer = 0;
+    p.machinegunTimer = 0;
+    p.shieldTimer = 0;
+    p.supernovaTimer = 0;
+    p.gravityTimer = 0;
   }
   broadcast({ type: 'phaseChange', phase: Phase.LOBBY, timer: 0, map: getMapData() });
 
@@ -285,6 +310,176 @@ function checkWinConditions() {
   const hots = [...players.values()].filter(p => p.isHot);
   if (hots.length === 0) return;
   if (runners.length === 0) endGame('hots');
+}
+
+// ─── Geração de Itens Cyberpunk v6 ───
+function spawnRandomPickup() {
+  if (pickups.length >= 5) return; // Limite de 5 itens no mapa simultaneamente
+
+  const hx = 3 * TILE, hy = 2 * TILE;
+  const hw = 44 * TILE, hh = 32 * TILE;
+
+  let spawned = false;
+  let attempts = 0;
+  while (!spawned && attempts < 100) {
+    attempts++;
+    const rx = hx + TILE + Math.random() * (hw - 3 * TILE);
+    const ry = hy + TILE + Math.random() * (hh - 3 * TILE);
+
+    if (!collidesWithWalls(rx - 10, ry - 10, 20, 20) && 
+        !collidesWithBoxes(rx - 10, ry - 10, 20, 20, -1)) {
+      
+      const types = ['speed', 'machinegun', 'shield', 'supernova', 'gravity'];
+      const type = types[Math.floor(Math.random() * types.length)];
+
+      const item = {
+        id: 'item_' + nextPickupId++,
+        x: rx - 10,
+        y: ry - 10,
+        w: 20,
+        h: 20,
+        type: type
+      };
+      pickups.push(item);
+      spawned = true;
+      
+      broadcast({ type: 'itemSpawned', item });
+    }
+  }
+}
+
+// ─── Disparo com Raycast Reutilizável v6 ───
+function performRaycast(currentPlayer, tx, ty, angleOffset = 0, isMachinegun = false) {
+  const px = currentPlayer.x + PLAYER_SIZE / 2;
+  const py = currentPlayer.y + PLAYER_SIZE / 2;
+
+  let dx = tx - px;
+  let dy = ty - py;
+  let len = Math.sqrt(dx * dx + dy * dy);
+  if (len < 1) return;
+
+  const maxRange = 600;
+  if (len > maxRange) {
+    dx = (dx / len) * maxRange;
+    dy = (dy / len) * maxRange;
+    len = maxRange;
+  }
+
+  let ux = dx / len;
+  let uy = dy / len;
+
+  if (angleOffset !== 0) {
+    const angle = Math.atan2(uy, ux) + angleOffset;
+    ux = Math.cos(angle);
+    uy = Math.sin(angle);
+    dx = ux * len;
+    dy = uy * len;
+  }
+
+  let finalEx = px + dx;
+  let finalEy = py + dy;
+  let hitType = null;
+  let hitTargetId = null;
+
+  const step = 5;
+  for (let d = 0; d < len; d += step) {
+    const rx = px + ux * d;
+    const ry = py + uy * d;
+
+    // 1. Colisão com paredes
+    if (collidesWithWalls(rx - 1, ry - 1, 2, 2)) {
+      finalEx = rx;
+      finalEy = ry;
+      hitType = 'wall';
+      break;
+    }
+
+    // 2. Colisão com caixas (arrasta um pouco)
+    let boxHit = null;
+    for (const b of pushables) {
+      if (rx >= b.x && rx <= b.x + b.w && ry >= b.y && ry <= b.y + b.h) {
+        boxHit = b;
+        break;
+      }
+    }
+    if (boxHit) {
+      finalEx = rx;
+      finalEy = ry;
+      hitType = 'box';
+      hitTargetId = boxHit.id;
+
+      // Metralhadora causa empurrão maior na caixa!
+      const pushDist = isMachinegun ? 40 : 35;
+      const targetBoxX = boxHit.x + ux * pushDist;
+      const targetBoxY = boxHit.y + uy * pushDist;
+      if (!collidesWithWalls(targetBoxX, boxHit.y, boxHit.w, boxHit.h) &&
+          !collidesWithBoxes(targetBoxX, boxHit.y, boxHit.w, boxHit.h, boxHit.id)) {
+        boxHit.x = targetBoxX;
+      }
+      if (!collidesWithWalls(boxHit.x, targetBoxY, boxHit.w, boxHit.h) &&
+          !collidesWithBoxes(boxHit.x, targetBoxY, boxHit.w, boxHit.h, boxHit.id)) {
+        boxHit.y = targetBoxY;
+      }
+      break;
+    }
+
+    // 3. Colisão com outros jogadores
+    let playerHit = null;
+    for (const [id, p2] of players) {
+      if (id === currentPlayer.id) continue;
+      const cx2 = p2.x + PLAYER_SIZE / 2;
+      const cy2 = p2.y + PLAYER_SIZE / 2;
+      const distToPlayer = Math.sqrt((rx - cx2) * (rx - cx2) + (ry - cy2) * (ry - cy2));
+      if (distToPlayer < PLAYER_SIZE / 2 + 2) {
+        playerHit = p2;
+        break;
+      }
+    }
+    if (playerHit) {
+      finalEx = rx;
+      finalEy = ry;
+      hitType = 'player';
+      hitTargetId = playerHit.id;
+
+      const pushDist = isMachinegun ? 35 : 30;
+      const targetPX = playerHit.x + ux * pushDist;
+      const targetPY = playerHit.y + uy * pushDist;
+      if (!collidesWithWalls(targetPX, playerHit.y, playerHit.w, playerHit.h) &&
+          !collidesWithBoxes(targetPX, playerHit.y, playerHit.w, playerHit.h, -1)) {
+        playerHit.x = targetPX;
+      }
+      if (!collidesWithWalls(playerHit.x, targetPY, playerHit.w, playerHit.h) &&
+          !collidesWithBoxes(playerHit.x, targetPY, playerHit.w, playerHit.h, -1)) {
+        playerHit.y = targetPY;
+      }
+
+      // Reduz velocidade por 0.5s (30 ticks)
+      playerHit.speedDebuffTimer = 30;
+
+      // Se for Pegador, perde sangue.
+      if (playerHit.isHot && !playerHit.isStunned) {
+        // Metralhadora causa 15 por tiro (45 total se acertar o spray triplo!), tiro normal tira 34
+        playerHit.health -= isMachinegun ? 15 : 34;
+        if (playerHit.health <= 0) {
+          playerHit.health = 0;
+          playerHit.isStunned = true;
+          playerHit.stunTimer = 10 * TICK_RATE; // Paralisado por 10s
+          broadcast({ type: 'stunned', playerId: playerHit.id, name: playerHit.name });
+        }
+      }
+      break;
+    }
+  }
+
+  // Envia feixe de laser para o cliente
+  broadcast({
+    type: 'bulletTraced',
+    shooterId: currentPlayer.id,
+    sx: px, sy: py,
+    ex: finalEx, ey: finalEy,
+    hitType,
+    color: isMachinegun ? '#ffcc00' : currentPlayer.color // Metralhadora atira amarelo ouro!
+  });
 }
 
 // ─── Servidor WebSockets ───
@@ -320,7 +515,7 @@ wss.on('connection', (ws) => {
         grabbedBox: null,
         mouseWorld: null,
 
-        // --- Novas mecânicas da v5 ---
+        // --- Mecânicas v5 ---
         ammo: 3,
         reloadTimer: 0,
         health: 100,
@@ -328,11 +523,17 @@ wss.on('connection', (ws) => {
         stunTimer: 0,
         speedDebuffTimer: 0,
         holdEnergy: 300,
+
+        // --- Buffs v6 ---
+        speedBoostTimer: 0,
+        machinegunTimer: 0,
+        shieldTimer: 0,
+        supernovaTimer: 0,
+        gravityTimer: 0,
       };
 
       players.set(pId, currentPlayer);
 
-      // Welcome
       ws.send(JSON.stringify({
         type: 'welcome',
         id: pId,
@@ -345,7 +546,6 @@ wss.on('connection', (ws) => {
 
       broadcast({ type: 'playerJoined', player: serializePlayer(currentPlayer) });
 
-      // Inicia o warmup de 60s quando bate o 3º jogador
       if (gamePhase === Phase.LOBBY && players.size >= MIN_PLAYERS_TO_START) {
         startWarmup();
       }
@@ -360,7 +560,7 @@ wss.on('connection', (ws) => {
       currentPlayer.input.right = !!msg.right;
     }
 
-    // ── ATIRAR COM ARMA (Mecânica v5) ──
+    // ── ATIRAR COM ARMA (Mecânica v5 + Metralhadora v6) ──
     if (msg.type === 'shoot') {
       if (currentPlayer.isHot) return; // Apenas corredores atiram
       if (currentPlayer.isStunned) return;
@@ -372,131 +572,17 @@ wss.on('connection', (ws) => {
         currentPlayer.reloadTimer = 5 * TICK_RATE; // 5 segundos de recarga
       }
 
-      const px = currentPlayer.x + PLAYER_SIZE / 2;
-      const py = currentPlayer.y + PLAYER_SIZE / 2;
       const tx = msg.tx;
       const ty = msg.ty;
 
-      let dx = tx - px;
-      let dy = ty - py;
-      let len = Math.sqrt(dx * dx + dy * dy);
-      
-      if (len >= 1) {
-        const maxRange = 600;
-        if (len > maxRange) {
-          dx = (dx / len) * maxRange;
-          dy = (dy / len) * maxRange;
-          len = maxRange;
-        }
-
-        const ux = dx / len;
-        const uy = dy / len;
-
-        let finalEx = px + dx;
-        let finalEy = py + dy;
-        let hitType = null;
-        let hitTargetId = null;
-
-        // Percorre o raio em passos curtos (5px)
-        const step = 5;
-        for (let d = 0; d < len; d += step) {
-          const rx = px + ux * d;
-          const ry = py + uy * d;
-
-          // 1. Colisão com paredes
-          if (collidesWithWalls(rx - 1, ry - 1, 2, 2)) {
-            finalEx = rx;
-            finalEy = ry;
-            hitType = 'wall';
-            break;
-          }
-
-          // 2. Colisão com caixas (arrasta um pouco)
-          let boxHit = null;
-          for (const b of pushables) {
-            if (rx >= b.x && rx <= b.x + b.w && ry >= b.y && ry <= b.y + b.h) {
-              boxHit = b;
-              break;
-            }
-          }
-          if (boxHit) {
-            finalEx = rx;
-            finalEy = ry;
-            hitType = 'box';
-            hitTargetId = boxHit.id;
-
-            // Arrasta a caixa 30px na direção do tiro
-            const pushDist = 35;
-            const targetBoxX = boxHit.x + ux * pushDist;
-            const targetBoxY = boxHit.y + uy * pushDist;
-            if (!collidesWithWalls(targetBoxX, boxHit.y, boxHit.w, boxHit.h) &&
-                !collidesWithBoxes(targetBoxX, boxHit.y, boxHit.w, boxHit.h, boxHit.id)) {
-              boxHit.x = targetBoxX;
-            }
-            if (!collidesWithWalls(boxHit.x, targetBoxY, boxHit.w, boxHit.h) &&
-                !collidesWithBoxes(boxHit.x, targetBoxY, boxHit.w, boxHit.h, boxHit.id)) {
-              boxHit.y = targetBoxY;
-            }
-            break;
-          }
-
-          // 3. Colisão com outros jogadores
-          let playerHit = null;
-          for (const [id, p2] of players) {
-            if (id === currentPlayer.id) continue;
-            const cx2 = p2.x + PLAYER_SIZE / 2;
-            const cy2 = p2.y + PLAYER_SIZE / 2;
-            const distToPlayer = Math.sqrt((rx - cx2) * (rx - cx2) + (ry - cy2) * (ry - cy2));
-            if (distToPlayer < PLAYER_SIZE / 2 + 2) {
-              playerHit = p2;
-              break;
-            }
-          }
-          if (playerHit) {
-            finalEx = rx;
-            finalEy = ry;
-            hitType = 'player';
-            hitTargetId = playerHit.id;
-
-            // Arrasta o jogador atingido por 30px
-            const pushDist = 30;
-            const targetPX = playerHit.x + ux * pushDist;
-            const targetPY = playerHit.y + uy * pushDist;
-            if (!collidesWithWalls(targetPX, playerHit.y, playerHit.w, playerHit.h) &&
-                !collidesWithBoxes(targetPX, playerHit.y, playerHit.w, playerHit.h, -1)) {
-              playerHit.x = targetPX;
-            }
-            if (!collidesWithWalls(playerHit.x, targetPY, playerHit.w, playerHit.h) &&
-                !collidesWithBoxes(playerHit.x, targetPY, playerHit.w, playerHit.h, -1)) {
-              playerHit.y = targetPY;
-            }
-
-            // Reduz velocidade por 0.5s (30 ticks)
-            playerHit.speedDebuffTimer = 30;
-
-            // Se for Pegador, perde sangue. 3 tiros (34 HP cada) zeram e paralisam
-            if (playerHit.isHot && !playerHit.isStunned) {
-              playerHit.health -= 34;
-              if (playerHit.health <= 0) {
-                playerHit.health = 0;
-                playerHit.isStunned = true;
-                playerHit.stunTimer = 10 * TICK_RATE; // Paralisado por 10s
-                broadcast({ type: 'stunned', playerId: playerHit.id, name: playerHit.name });
-              }
-            }
-            break;
-          }
-        }
-
-        // Envia feixe de laser para o cliente renderizar
-        broadcast({
-          type: 'bulletTraced',
-          shooterId: currentPlayer.id,
-          sx: px, sy: py,
-          ex: finalEx, ey: finalEy,
-          hitType,
-          color: currentPlayer.color
-        });
+      if (currentPlayer.machinegunTimer > 0) {
+        // Metralhadora neon: atira 3 tiros em spray espalhado em formato de rajada instantânea!
+        performRaycast(currentPlayer, tx, ty, -0.06, true);
+        performRaycast(currentPlayer, tx, ty, 0, true);
+        performRaycast(currentPlayer, tx, ty, 0.06, true);
+      } else {
+        // Tiro normal de precisão
+        performRaycast(currentPlayer, tx, ty, 0, false);
       }
     }
 
@@ -514,9 +600,9 @@ wss.on('connection', (ws) => {
       }
     }
 
+    // ── GRAB CAIXAS ──
     if (msg.type === 'grab') {
       if (currentPlayer.grabbedBox) return;
-      // Não pode pegar se a energia estiver recarregando
       if (currentPlayer.holdEnergy <= 30) return; 
 
       const box = pushables.find(b => b.id === msg.boxId);
@@ -550,29 +636,49 @@ wss.on('connection', (ws) => {
       }
       players.delete(currentPlayer.id);
       broadcast({ type: 'playerLeft', id: currentPlayer.id });
-      checkWinConditions();
+
+      // Se não restar ninguém, destroi o servidor (retorna ao lobby)
+      if (players.size === 0) {
+        resetGame();
+      } else {
+        checkWinConditions();
+      }
     }
   });
 });
 
-// ─── Loop Principal (60 Hz) ───
+// ─── Loop Principal da Física (60 FPS) ───
 function gameTick() {
   tickCount++;
 
-  // Fase & Timer
+  // 1. Cronômetro das fases
   if (gamePhase === Phase.WARMUP || gamePhase === Phase.INGAME || gamePhase === Phase.ENDGAME) {
-    phaseTimer--;
-    if (phaseTimer <= 0) {
-      if (gamePhase === Phase.WARMUP) startInGame();
-      else if (gamePhase === Phase.INGAME) endGame('runners');
-      else if (gamePhase === Phase.ENDGAME) resetGame();
-      return;
+    if (phaseTimer > 0) {
+      phaseTimer--;
+      if (phaseTimer <= 0) {
+        if (gamePhase === Phase.WARMUP) {
+          startInGame();
+        } else if (gamePhase === Phase.INGAME) {
+          endGame('runners'); // Fim do tempo = corredores vencem!
+        } else if (gamePhase === Phase.ENDGAME) {
+          resetGame();
+        }
+      }
     }
   }
 
-  // ── Atualizar Estados Temporais de Jogadores ──
+  // 2. Spawning dinâmico de itens a cada 15 segundos nas fases ativas
+  if (gamePhase === Phase.WARMUP || gamePhase === Phase.INGAME) {
+    pickupSpawnTimer--;
+    if (pickupSpawnTimer <= 0) {
+      pickupSpawnTimer = PICKUP_SPAWN_INTERVAL;
+      spawnRandomPickup();
+    }
+  }
+
+  // 3. Atualização individual de cada jogador
   for (const [, p] of players) {
-    // 1. Recarga da arma (5s)
+    // 1. Recarga da arma (5 segundos)
     if (p.reloadTimer > 0) {
       p.reloadTimer--;
       if (p.reloadTimer === 0) {
@@ -594,12 +700,11 @@ function gameTick() {
       p.speedDebuffTimer--;
     }
 
-    // 4. Limite de segurar objeto (5 segundos = 300 ticks)
+    // 4. Limite de segurar objeto (5 segundos)
     if (p.grabbedBox !== null) {
       p.holdEnergy--;
       if (p.holdEnergy <= 0) {
         p.holdEnergy = 0;
-        // Solta a caixa automaticamente!
         const box = pushables.find(b => b.id === p.grabbedBox);
         if (box) box.grabbedBy = null;
         p.grabbedBox = null;
@@ -607,14 +712,78 @@ function gameTick() {
       }
     } else {
       if (p.holdEnergy < 300) {
-        p.holdEnergy++; // Recarrega na mesma velocidade
+        // Hots recarregam a barra 2x mais rápido que corredores
+        p.holdEnergy += p.isHot ? 2 : 1;
+        if (p.holdEnergy > 300) p.holdEnergy = 300;
+      }
+    }
+
+    // 5. Decremento dos Timers de Buffs/Itens v6
+    if (p.speedBoostTimer > 0) p.speedBoostTimer--;
+    if (p.machinegunTimer > 0) p.machinegunTimer--;
+    if (p.shieldTimer > 0) p.shieldTimer--;
+    if (p.supernovaTimer > 0) p.supernovaTimer--;
+    if (p.gravityTimer > 0) p.gravityTimer--;
+  }
+
+  // 4. Detecção de Coleta de Itens v6
+  for (let i = pickups.length - 1; i >= 0; i--) {
+    const pickup = pickups[i];
+    for (const [, p] of players) {
+      if (p.isStunned) continue;
+      const px = p.x + PLAYER_SIZE / 2;
+      const py = p.y + PLAYER_SIZE / 2;
+      const ix = pickup.x + 10;
+      const iy = pickup.y + 10;
+      const dist = Math.sqrt((px - ix) * (px - ix) + (py - iy) * (py - iy));
+
+      if (dist < 22) { // Colisão!
+        let collected = false;
+
+        if (p.isHot) {
+          // Pegador coleta Speed, Supernova ou Aura Gravitacional
+          if (pickup.type === 'speed') {
+            p.speedBoostTimer = 15 * TICK_RATE;
+            collected = true;
+          } else if (pickup.type === 'supernova') {
+            p.supernovaTimer = 10 * TICK_RATE;
+            collected = true;
+          } else if (pickup.type === 'gravity') {
+            p.gravityTimer = 12 * TICK_RATE;
+            collected = true;
+          }
+        } else {
+          // Corredor coleta Speed, Metralhadora Burst ou Escudo de Plasma
+          if (pickup.type === 'speed') {
+            p.speedBoostTimer = 15 * TICK_RATE;
+            collected = true;
+          } else if (pickup.type === 'machinegun') {
+            p.machinegunTimer = 15 * TICK_RATE;
+            collected = true;
+          } else if (pickup.type === 'shield') {
+            p.shieldTimer = 20 * TICK_RATE;
+            collected = true;
+          }
+        }
+
+        if (collected) {
+          broadcast({
+            type: 'collected',
+            playerId: p.id,
+            playerName: p.name,
+            itemType: pickup.type,
+            color: p.color
+          });
+          pickups.splice(i, 1);
+          break; // sai do loop de jogadores para este pickup
+        }
       }
     }
   }
 
-  // ── Mover Jogadores (Livre em LOBBY, WARMUP e INGAME) ──
+  // 5. ── Mover Jogadores ──
   for (const [, p] of players) {
-    if (p.isStunned) continue; // Paralisado não se move!
+    if (p.isStunned) continue;
 
     let dx = 0, dy = 0;
     if (p.input.up) dy -= 1;
@@ -638,6 +807,34 @@ function gameTick() {
       speed *= 0.5;
     }
 
+    // --- Buffs v6 ---
+    // Super Velocidade (+40%)
+    if (p.speedBoostTimer > 0) {
+      speed *= 1.4;
+    }
+    // Supernova do Hot (+30%)
+    if (p.isHot && p.supernovaTimer > 0) {
+      speed *= 1.3;
+    }
+    // Aura de Gravidade (Corredor lento por 60% perto de Hot com Teia)
+    if (!p.isHot) {
+      let underGravity = false;
+      for (const [, p2] of players) {
+        if (p2.isHot && p2.gravityTimer > 0) {
+          const gdx = (p2.x + p2.w / 2) - (p.x + p.w / 2);
+          const gdy = (p2.y + p2.h / 2) - (p.y + p.h / 2);
+          const gdist = Math.sqrt(gdx * gdx + gdy * gdy);
+          if (gdist <= 160) {
+            underGravity = true;
+            break;
+          }
+        }
+      }
+      if (underGravity) {
+        speed *= 0.4;
+      }
+    }
+
     // Mover X
     let nx = p.x + dx * speed;
     if (!collidesWithWalls(nx, p.y, p.w, p.h) && !collidesWithBoxes(nx, p.y, p.w, p.h, -1)) {
@@ -648,12 +845,13 @@ function gameTick() {
     if (!collidesWithWalls(p.x, ny, p.w, p.h) && !collidesWithBoxes(p.x, ny, p.w, p.h, -1)) {
       p.y = ny;
     }
+    
     // Clamps
     p.x = Math.max(TILE, Math.min(MAP_W - TILE - p.w, p.x));
     p.y = Math.max(TILE, Math.min(MAP_H - TILE - p.h, p.y));
   }
 
-  // ── Mover Caixas Arrastadas ──
+  // 6. ── Mover Caixas Arrastadas ──
   for (const box of pushables) {
     if (!box.grabbedBy) continue;
     const p = players.get(box.grabbedBy);
@@ -670,19 +868,6 @@ function gameTick() {
     const mx = (ddx / dist) * spd;
     const my = (ddy / dist) * spd;
 
-    // Limitar distância máxima do arrasto
-    const afterX = box.x + mx;
-    const afterY = box.y + my;
-    const pdx = (afterX + box.w / 2) - (p.x + p.w / 2);
-    const pdy = (afterY + box.h / 2) - (p.y + p.h / 2);
-    if (Math.sqrt(pdx * pdx + pdy * pdy) > GRAB_RANGE + box.w / 2 + 20) {
-      box.grabbedBy = null;
-      p.grabbedBox = null;
-      p.mouseWorld = null;
-      continue;
-    }
-
-    // Mover com colisão
     const nxB = box.x + mx;
     if (!collidesWithWalls(nxB, box.y, box.w, box.h) && !collidesWithBoxes(nxB, box.y, box.w, box.h, box.id)) {
       box.x = nxB;
@@ -693,7 +878,7 @@ function gameTick() {
     }
   }
 
-  // ── Infecção (Apenas em Partida InGame e Hots não Stunned!) ──
+  // 7. ── Infecção (Apenas em Partida InGame e Hots não Stunned!) ──
   if (gamePhase === Phase.INGAME) {
     const hots = [...players.values()].filter(p => p.isHot && !p.isStunned);
     const runners = [...players.values()].filter(p => !p.isHot);
@@ -701,24 +886,59 @@ function gameTick() {
       for (const runner of runners) {
         const dx = (hot.x + hot.w / 2) - (runner.x + runner.w / 2);
         const dy = (hot.y + hot.h / 2) - (runner.y + runner.h / 2);
-        if (Math.sqrt(dx * dx + dy * dy) < INFECTION_RADIUS) {
-          runner.isHot = true;
-          runner.speed = HOT_SPEED;
-          runner.health = 100; // Preenche vida
-          broadcast({
-            type: 'infected',
-            playerId: runner.id,
-            byPlayerId: hot.id,
-            name: runner.name,
-            byName: hot.name,
-          });
+        
+        let infRad = INFECTION_RADIUS;
+        if (hot.supernovaTimer > 0) infRad += 25; // Supernova aumenta raio de contágio!
+
+        if (Math.sqrt(dx * dx + dy * dy) < infRad) {
+          // Se o corredor tiver escudo de plasma ativo, absorve e empurra o pegador
+          if (runner.shieldTimer > 0) {
+            runner.shieldTimer = 0; // Consome escudo
+
+            // Empurra o Hot 120 pixels na direção oposta
+            const pushDist = 120;
+            const len = Math.sqrt(dx * dx + dy * dy) || 1;
+            const hux = dx / len;
+            const huy = dy / len;
+            const targetHotX = hot.x + hux * pushDist;
+            const targetHotY = hot.y + huy * pushDist;
+            
+            if (!collidesWithWalls(targetHotX, hot.y, hot.w, hot.h) &&
+                !collidesWithBoxes(targetHotX, hot.y, hot.w, hot.h, -1)) {
+              hot.x = targetHotX;
+            }
+            if (!collidesWithWalls(hot.x, targetHotY, hot.w, hot.h) &&
+                !collidesWithBoxes(hot.x, targetHotY, hot.w, hot.h, -1)) {
+              hot.y = targetHotY;
+            }
+
+            broadcast({
+              type: 'shieldPopped',
+              runnerId: runner.id,
+              runnerName: runner.name,
+              hotId: hot.id,
+              hotName: hot.name
+            });
+          } else {
+            // Contamina normalmente
+            runner.isHot = true;
+            runner.speed = HOT_SPEED;
+            runner.health = 100;
+            broadcast({
+              type: 'infected',
+              playerId: runner.id,
+              byPlayerId: hot.id,
+              name: runner.name,
+              byName: hot.name,
+            });
+          }
         }
       }
     }
     checkWinConditions();
   }
 
-  // ── Estado Periódico ──
+  // 8. ── Estado Periódico (Envia pickups v6 para os clientes!) ──
   if (tickCount % BROADCAST_EVERY === 0 && players.size > 0) {
     broadcast({
       type: 'gameState',
@@ -728,6 +948,7 @@ function gameTick() {
       timer: Math.ceil(phaseTimer / TICK_RATE),
       runnersCount: [...players.values()].filter(p => !p.isHot).length,
       hotsCount: [...players.values()].filter(p => p.isHot).length,
+      pickups: pickups.map(pk => ({ id: pk.id, x: pk.x, y: pk.y, type: pk.type })) // Envia os drops ativos
     });
   }
 }
@@ -735,5 +956,5 @@ function gameTick() {
 setInterval(gameTick, TICK_MS);
 
 server.listen(PORT, () => {
-  console.log(`\n  ⚡ Servidor Único BraainHot v5 rodando em http://localhost:${PORT}\n`);
+  console.log(`\n  ⚡ Servidor Único BraainHot v6 rodando em http://localhost:${PORT}\n`);
 });

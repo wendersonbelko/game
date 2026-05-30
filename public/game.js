@@ -45,6 +45,7 @@ const chatInput = document.getElementById('chatInput');
 let ws = null, myId = null, gameMap = null;
 let players = new Map();
 let pushables = [];
+let activePickups = []; // Itens Cyberpunk v6
 let phase = 'lobby', timer = 0, runnersCount = 0, hotsCount = 0;
 let joined = false;
 let camX = 0, camY = 0, shakeX = 0, shakeY = 0, shakeMag = 0;
@@ -263,6 +264,7 @@ function handleMessage(msg) {
       phase = msg.phase; timer = msg.timer;
       runnersCount = msg.runnersCount; hotsCount = msg.hotsCount;
       if (msg.pushables) pushables = msg.pushables;
+      if (msg.pickups) activePickups = msg.pickups; // Captura drops v6!
 
       const ids = new Set();
       for (const sp of msg.players) {
@@ -270,7 +272,7 @@ function handleMessage(msg) {
         targetPos.set(sp.id, { x: sp.x, y: sp.y });
         const ex = players.get(sp.id);
         if (ex) {
-          Object.assign(ex, sp); // Copia todas as novas mecânicas (ammo, health, energy)
+          Object.assign(ex, sp); // Copia todas as novas mecânicas (ammo, health, energy, e buffs!)
         } else {
           players.set(sp.id, { ...sp });
         }
@@ -331,6 +333,45 @@ function handleMessage(msg) {
 
     case 'chat':
       appendChatMessage(msg.name, msg.color, msg.text);
+      break;
+
+    case 'itemSpawned':
+      spawnImpactSpark(msg.item.x + 10, msg.item.y + 10, '#00ff88');
+      break;
+
+    case 'collected':
+      const itemNames = {
+        speed: 'SUPER VELOCIDADE ⚡ (+40%)',
+        machinegun: 'METRALHADORA BURST 🔫 (Rajada Tripla)',
+        shield: 'ESCUDO DE PLASMA 🛡️ (Absorve infecção)',
+        supernova: 'SUPERNOVA 🔥 (Calor & Velocidade)',
+        gravity: 'AURA GRAVITACIONAL 🕸️ (Lentidão em área)'
+      };
+      const label = itemNames[msg.itemType] || 'ITEM ESPECIAL';
+      addFeedItem(`🎉 ${msg.playerName} coletou ${label}!`);
+      
+      const itemColors = { speed: '#00ff88', machinegun: '#ffcc00', shield: '#00f0ff', supernova: '#ff2244', gravity: '#aa66ff' };
+      const col = itemColors[msg.itemType] || '#ffffff';
+      
+      // Burst de partículas de feedback de coleta no player
+      const cp = players.get(msg.playerId);
+      if (cp) {
+        for (let k = 0; k < 25; k++) {
+          spawnParticle(cp.x + 14, cp.y + 14, col, 25 + Math.random()*20, 5, 2.5);
+        }
+      }
+      break;
+
+    case 'shieldPopped':
+      addFeedItem(`🛡️ O Escudo de ${msg.runnerName} estourou e empurrou ${msg.hotName}!`);
+      shakeMag = 18;
+      const rp = players.get(msg.runnerId);
+      if (rp) {
+        // Shockwave de partículas azul neon de escudo
+        for (let k = 0; k < 40; k++) {
+          spawnParticle(rp.x + 14, rp.y + 14, '#00f0ff', 35 + Math.random()*25, 7, 3);
+        }
+      }
       break;
 
     case 'gameOver':
@@ -613,6 +654,7 @@ function render() {
   drawWalls();
   drawTethers();
   drawBoxes3D();
+  drawPickups(); // Desenha itens dropados cyberpunk v6
   drawPlayers();
   drawLasers();
   drawParticles();
@@ -786,23 +828,117 @@ function drawBoxes3D() {
   }
 }
 
+// ── Desenhar Drops de Itens Cyberpunk v6 ──
+function drawPickups() {
+  for (const pk of activePickups) {
+    const cx = pk.x + 10;
+    const cy = pk.y + 10;
+    
+    // Animação de flutuação e rotação
+    const floatOffset = Math.sin(Date.now() / 250 + pk.x) * 4;
+    const rotateAngle = (Date.now() / 600) % (Math.PI * 2);
+    
+    // Configurações de cores baseadas no tipo
+    const types = {
+      speed: { label: '⚡ SPEED', color: '#00ff88' },
+      machinegun: { label: '🔫 BURST', color: '#ffcc00' },
+      shield: { label: '🛡️ SHIELD', color: '#00f0ff' },
+      supernova: { label: '🔥 OVRDRV', color: '#ff2244' },
+      gravity: { label: '🕸️ SLOW', color: '#aa66ff' }
+    };
+    const cfg = types[pk.type] || types.speed;
+    
+    ctx.save();
+    ctx.translate(cx, cy + floatOffset);
+    ctx.rotate(rotateAngle);
+    
+    // Caixa 3D rotacionada
+    ctx.shadowBlur = 15;
+    ctx.shadowColor = cfg.color;
+    ctx.fillStyle = cfg.color;
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.5;
+    
+    ctx.fillRect(-8, -8, 16, 16);
+    ctx.strokeRect(-8, -8, 16, 16);
+    
+    // Detalhe interno do cubo holográfico
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.fillRect(-4, -4, 8, 8);
+    
+    ctx.restore();
+    
+    // Texto flutuante
+    ctx.save();
+    ctx.fillStyle = cfg.color;
+    ctx.font = 'bold 9px Rajdhani';
+    ctx.textAlign = 'center';
+    ctx.fillText(cfg.label, cx, pk.y - 12 + floatOffset);
+    ctx.restore();
+  }
+}
+
 function drawPlayers() {
   for (const [id, p] of players) {
     const isMe = id === myId;
     const sz = 28;
     const cx = p.x + sz/2, cy = p.y + sz/2;
 
+    // --- Partículas de Trails de Itens/Buffs v6 ---
     if (p.isHot && !p.isStunned) spawnHotTrail(p.x, p.y);
     if (p.isStunned) spawnStunTrail(p.x, p.y);
+    
+    // Rastro verde de Super Velocidade
+    if (p.speedBoostTimer > 0 && Math.random() > 0.5) {
+      spawnParticle(p.x + 14 + (Math.random()-0.5)*12, p.y + 14, '#00ff88', 12, 0.5, 1.5);
+    }
+    // Rastro flamejante de Supernova para o Hot
+    if (p.isHot && p.supernovaTimer > 0) {
+      for (let k = 0; k < 2; k++) {
+        spawnParticle(p.x + 14 + (Math.random()-0.5)*15, p.y + 14, '#ffcc00', 16, 1.2, 2.5);
+      }
+    }
+
+    // --- Efeitos Visuais no Canvas (Auras e Escudos) v6 ---
+    // 1. Aura Gravitacional do Hot (160px de raio roxo neon)
+    if (p.isHot && p.gravityTimer > 0) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(170,102,255,0.25)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 10]);
+      ctx.shadowColor = '#aa66ff';
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 160, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+
+      // Partículas roxas sugadas para o centro
+      if (Math.random() > 0.6) {
+        const angle = Math.random() * Math.PI * 2;
+        const radius = 60 + Math.random() * 100;
+        const px_part = cx + Math.cos(angle) * radius;
+        const py_part = cy + Math.sin(angle) * radius;
+        particles.push({
+          x: px_part, y: py_part,
+          vx: -Math.cos(angle) * 1.5, vy: -Math.sin(angle) * 1.5,
+          life: 30, maxLife: 30,
+          color: '#aa66ff', size: 1.5
+        });
+      }
+    }
 
     ctx.save();
 
+    // 2. Glow principal do player
     if (p.isStunned) {
       ctx.shadowColor = 'rgba(136,68,255,0.75)';
       ctx.shadowBlur = 18 + Math.sin(Date.now() / 150) * 6;
     } else if (p.isHot) {
-      ctx.shadowColor = 'rgba(255,34,68,0.6)';
-      ctx.shadowBlur = 18 + Math.sin(Date.now() / 200) * 5;
+      // Se tiver Supernova, brilha MUITO mais quente e flamejante
+      ctx.shadowColor = p.supernovaTimer > 0 ? '#ff3300' : 'rgba(255,34,68,0.6)';
+      ctx.shadowBlur = p.supernovaTimer > 0 ? 25 : (18 + Math.sin(Date.now() / 200) * 5);
     } else {
       ctx.shadowColor = p.color || '#00f0ff';
       ctx.shadowBlur = 10;
@@ -820,7 +956,7 @@ function drawPlayers() {
     } else if (p.isHot) {
       const grad = ctx.createRadialGradient(cx, cy, 2, cx, cy, sz/2);
       grad.addColorStop(0, '#ffcc00');
-      grad.addColorStop(0.5, '#ff4400');
+      grad.addColorStop(0.5, p.supernovaTimer > 0 ? '#ff1100' : '#ff4400');
       grad.addColorStop(1, '#cc0022');
       ctx.fillStyle = grad;
     } else {
@@ -838,6 +974,20 @@ function drawPlayers() {
     ctx.stroke();
     ctx.restore();
 
+    // 3. Escudo de Plasma do Corredor (bolha protetora cyan neon)
+    if (p.shieldTimer > 0) {
+      ctx.save();
+      ctx.strokeStyle = '#00f0ff';
+      ctx.lineWidth = 2.5;
+      ctx.shadowColor = '#00f0ff';
+      ctx.shadowBlur = 12;
+      ctx.beginPath();
+      // Bolha dá uma leve pulsada esteticamente
+      ctx.arc(cx, cy, sz/2 + 8 + Math.sin(Date.now() / 100) * 1.5, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
     // Nome
     ctx.fillStyle = p.isStunned ? '#ccaaff' : (p.isHot ? '#ff8866' : (p.color || '#88ddff'));
     ctx.font = 'bold 11px Rajdhani';
@@ -851,6 +1001,29 @@ function drawPlayers() {
       ctx.font = '9px Orbitron';
       ctx.fillText(`⚡ PARALISADO (${remainingSecs}s)`, cx, p.y - 20);
     }
+
+    // --- Floating Buff Labels v6 ---
+    let buffYOffset = p.y - 20;
+    if (p.isStunned) buffYOffset = p.y - 32;
+
+    const activeBuffs = [];
+    if (p.speedBoostTimer > 0) activeBuffs.push({ label: `⚡ SPEED (${Math.ceil(p.speedBoostTimer/60)}s)`, color: '#00ff88' });
+    if (p.machinegunTimer > 0) activeBuffs.push({ label: `🔫 BURST (${Math.ceil(p.machinegunTimer/60)}s)`, color: '#ffcc00' });
+    if (p.shieldTimer > 0) activeBuffs.push({ label: `🛡️ SHIELD (${Math.ceil(p.shieldTimer/60)}s)`, color: '#00f0ff' });
+    if (p.supernovaTimer > 0) activeBuffs.push({ label: `🔥 SUPERNOVA (${Math.ceil(p.supernovaTimer/60)}s)`, color: '#ff2244' });
+    if (p.gravityTimer > 0) activeBuffs.push({ label: `🕸️ GRAVITY (${Math.ceil(p.gravityTimer/60)}s)`, color: '#aa66ff' });
+
+    ctx.save();
+    ctx.font = 'bold 8px Orbitron';
+    ctx.textAlign = 'center';
+    for (const bf of activeBuffs) {
+      ctx.fillStyle = bf.color;
+      ctx.shadowColor = bf.color;
+      ctx.shadowBlur = 6;
+      ctx.fillText(bf.label, cx, buffYOffset);
+      buffYOffset -= 10;
+    }
+    ctx.restore();
 
     if (isMe) {
       ctx.strokeStyle = 'rgba(255,255,255,0.5)';
