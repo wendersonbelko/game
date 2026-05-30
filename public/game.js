@@ -194,8 +194,8 @@ canvas.addEventListener('mousedown', e => {
   for (const b of pushables) {
     if (wx >= b.x && wx <= b.x + b.w && wy >= b.y && wy <= b.y + b.h) {
       const me = players.get(myId);
-      // Se não for Hot e tiver energia mínima
-      if (me && !me.isHot && me.holdEnergy > 30) {
+      // Se tiver energia mínima
+      if (me && me.holdEnergy > 30) {
         if (ws && ws.readyState === 1) {
           ws.send(JSON.stringify({ type: 'grab', boxId: b.id }));
           grabbedBoxId = b.id;
@@ -398,35 +398,50 @@ function updateWeaponHud() {
   const me = players.get(myId);
   if (!me) return;
 
-  // 1. Mostrar/Ocultar HUD dependendo se sou Hot ou não
-  if (me.isHot) {
-    weaponHud.classList.add('hidden');
-    return;
-  }
+  // Mostra o HUD para ambos os papéis (Corredores e Hots)
   weaponHud.classList.remove('hidden');
 
-  // 2. Tether Energy Bar (0-300 ticks)
+  // 1. Tether Energy Bar (0-300 ticks)
   const energyPercent = (me.holdEnergy / 300) * 100;
   energyBar.style.width = `${energyPercent}%`;
-  if (energyPercent < 20) {
-    energyBar.classList.add('low');
-  } else {
-    energyBar.classList.remove('low');
-  }
 
-  // 3. Ammo ticks (3 ticks)
-  ammoContainer.innerHTML = '';
-  for (let i = 0; i < 3; i++) {
-    const tick = document.createElement('div');
-    tick.className = 'ammo-tick' + (i < me.ammo ? ' active' : '');
-    ammoContainer.appendChild(tick);
-  }
-
-  // 4. Reload indicator
-  if (me.reloadTimer > 0) {
-    reloadAlert.classList.remove('hidden');
-  } else {
+  // 2. Estilização e lógica baseadas no papel (Hot vs Runner)
+  const ammoRow = ammoContainer.parentElement;
+  if (me.isHot) {
+    // Hot: esconde a arma e o alerta de recarga
+    ammoRow.classList.add('hidden');
     reloadAlert.classList.add('hidden');
+
+    // Estilo vermelho/laranja neon de calor
+    energyBar.style.background = 'linear-gradient(90deg, #ff2244, #ff6600)';
+    energyBar.style.boxShadow = '0 0 10px rgba(255,34,68,0.5)';
+  } else {
+    // Runner: exibe a munição da arma
+    ammoRow.classList.remove('hidden');
+
+    // Cor baseada na energia (cyan/green ou vermelho se estiver crítica)
+    if (energyPercent < 20) {
+      energyBar.style.background = 'linear-gradient(90deg, #ff2244, #ff6600)';
+      energyBar.style.boxShadow = '0 0 10px rgba(255,34,68,0.5)';
+    } else {
+      energyBar.style.background = 'linear-gradient(90deg, #00f0ff, #00ff88)';
+      energyBar.style.boxShadow = '0 0 10px rgba(0,240,255,0.4)';
+    }
+
+    // Ammo ticks (3 ticks)
+    ammoContainer.innerHTML = '';
+    for (let i = 0; i < 3; i++) {
+      const tick = document.createElement('div');
+      tick.className = 'ammo-tick' + (i < me.ammo ? ' active' : '');
+      ammoContainer.appendChild(tick);
+    }
+
+    // Reload indicator
+    if (me.reloadTimer > 0) {
+      reloadAlert.classList.remove('hidden');
+    } else {
+      reloadAlert.classList.add('hidden');
+    }
   }
 }
 
