@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BraainHot — Neon Tag Multiplayer</title>
+  <meta name="description" content="BraainHot: jogo multiplayer de pega-pega neon cyberpunk.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- LOBBY -->
+  <div id="lobby">
+    <div class="lobby-bg"></div>
+    <div class="lobby-content">
+      <h1 class="game-title">
+        <span class="title-brain">Braain</span><span class="title-hot">Hot</span>
+      </h1>
+      <p class="game-subtitle">NEON TAG — SOBREVIVA ÀS CHAMAS</p>
+
+      <div class="join-box">
+        <label for="nameInput">SEU CODINOME</label>
+        <input type="text" id="nameInput" maxlength="16" placeholder="Ex: NeonRunner" autocomplete="off" spellcheck="false">
+
+        <label class="color-label">ESCOLHA SUA COR</label>
+        <div id="colorPicker" class="color-picker"></div>
+
+        <button id="joinBtn">ENTRAR NA ARENA</button>
+      </div>
+
+      <div class="instructions">
+        <div class="instr-card">
+          <span class="instr-icon">🏃</span>
+          <h4>Corredores</h4>
+          <p>Aqueça por 60s. Depois, fuja!</p>
+        </div>
+        <div class="instr-card hot-card">
+          <span class="instr-icon">🔥</span>
+          <h4>Hot</h4>
+          <p>Toque e infecte todos em 7 min!</p>
+        </div>
+        <div class="instr-card">
+          <span class="instr-icon">📦</span>
+          <h4>Caixas</h4>
+          <p>Clique e arraste para bloquear!</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CANVAS -->
+  <canvas id="gameCanvas"></canvas>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div id="hudTop">
+      <div id="hudPhase">LOBBY</div>
+      <div id="hudTimer">--:--</div>
+      <div id="hudScore">
+        <span id="hudRunners" class="hud-runners">🏃 0</span>
+        <span class="hud-vs">VS</span>
+        <span id="hudHots" class="hud-hots">🔥 0</span>
+      </div>
+    </div>
+    <div id="hudFeed"></div>
+    <div id="grabHint" class="hidden">🖱️ Segure o mouse para arrastar a caixa</div>
+  </div>
+
+  <!-- FIM DE JOGO -->
+  <div id="endScreen" class="hidden">
+    <div class="end-content">
+      <h2 id="endTitle">FIM DE JOGO</h2>
+      <p id="endMessage"></p>
+      <p class="end-sub">Reiniciando a rodada em breve...</p>
+    </div>
+  </div>
+
+  <!-- HOT SELECT -->
+  <div id="hotSelectScreen" class="hidden">
+    <div class="hot-select-content">
+      <div class="fire-ring"></div>
+      <h2>HOT ALFA SELECIONADO</h2>
+      <p id="hotSelectName"></p>
+    </div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
