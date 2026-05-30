@@ -91,6 +91,12 @@ function initColorPicker() {
 }
 initColorPicker();
 
+// Desabilita o botão inicialmente até o handshake websocket estar aberto
+joinBtn.disabled = true;
+joinBtn.textContent = 'CONECTANDO AO SERVIDOR...';
+joinBtn.style.opacity = '0.5';
+joinBtn.style.cursor = 'not-allowed';
+
 // ── Botão Entrar na Arena ──
 joinBtn.addEventListener('click', () => {
   const name = nameInput.value.trim() || 'Anon';
@@ -234,10 +240,20 @@ canvas.addEventListener('mouseup', () => {
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${proto}://${location.host}`);
-  ws.onopen = () => console.log('Conectado ao Servidor Único');
+  ws.onopen = () => {
+    console.log('Conectado ao Servidor Único');
+    joinBtn.disabled = false;
+    joinBtn.textContent = 'ENTRAR NA ARENA';
+    joinBtn.style.opacity = '1';
+    joinBtn.style.cursor = 'pointer';
+  };
   ws.onmessage = e => handleMessage(JSON.parse(e.data));
   ws.onclose = () => {
     joined = false;
+    joinBtn.disabled = true;
+    joinBtn.textContent = 'CONECTANDO AO SERVIDOR...';
+    joinBtn.style.opacity = '0.5';
+    joinBtn.style.cursor = 'not-allowed';
     showLobbyScreen();
     setTimeout(connect, 2000);
   };
