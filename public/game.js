@@ -90,6 +90,14 @@ function initColorPicker() {
 }
 initColorPicker();
 
+// ── Botão Entrar na Arena ──
+joinBtn.addEventListener('click', () => {
+  const name = nameInput.value.trim() || 'Anon';
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({ type: 'join', name, color: selectedColor }));
+  }
+});
+
 // ── Roster Collapse/Expand ──
 togglePlayerListBtn.addEventListener('click', () => {
   isRosterCollapsed = !isRosterCollapsed;
