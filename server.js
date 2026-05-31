@@ -87,82 +87,159 @@ function generateMap() {
   addWall(hx, hy2 - T, 28 * T, T);
   addWall(hx + 32 * T, hy2 - T, 30 * T, T);
 
-  // ── Paredes internas (Redesenhadas para Loops e Corredores de Caçada) ──
-  // Divisória Horizontal 1
-  addWall(hx + T, hy + 14 * T, 15 * T, T);
-  addWall(hx + 22 * T, hy + 14 * T, 18 * T, T);
-  addWall(hx + 46 * T, hy + 14 * T, 15 * T, T);
-
-  // Divisória Horizontal 2
-  addWall(hx + T, hy + 28 * T, 10 * T, T);
-  addWall(hx + 16 * T, hy + 28 * T, 20 * T, T);
-  addWall(hx + 42 * T, hy + 28 * T, 19 * T, T);
-
-  // Divisórias Verticais (Garantem rotas de fuga e loops verticais)
-  addWall(hx + 18 * T, hy + T, T, 8 * T);
-  addWall(hx + 18 * T, hy + 15 * T, T, 7 * T);
-  addWall(hx + 18 * T, hy + 29 * T, T, 8 * T);
-
-  addWall(hx + 42 * T, hy + T, T, 9 * T);
-  addWall(hx + 42 * T, hy + 15 * T, T, 9 * T);
-  addWall(hx + 42 * T, hy + 29 * T, T, 10 * T);
-
-  // Colunas de tecnologia no centro do mapa (Loop rápido)
-  addWall(hx + 26 * T, hy + 18 * T, 2 * T, 2 * T);
-  addWall(hx + 34 * T, hy + 18 * T, 2 * T, 2 * T);
-  addWall(hx + 26 * T, hy + 24 * T, 2 * T, 2 * T);
-  addWall(hx + 34 * T, hy + 24 * T, 2 * T, 2 * T);
-
-  // Móveis fixos / Barreiras adicionais em salas externas
-  addWall(hx + 2 * T, hy + 2 * T, 5 * T, T);
-  addWall(hx + 55 * T, hy + 2 * T, 5 * T, T);
-  addWall(hx + 2 * T, hy + 40 * T, 5 * T, T);
-  addWall(hx + 55 * T, hy + 40 * T, 5 * T, T);
-
-  // Caixas empurráveis (Expandido para 37 caixas no total!)
-  const boxDefs = [
-    // --- Setor 1 (Superior) ---
-    { col: 5, row: 5, size: 'S' }, { col: 8, row: 3, size: 'M' }, { col: 10, row: 8, size: 'S' },
-    { col: 17, row: 3, size: 'L' }, { col: 24, row: 8, size: 'M' }, { col: 20, row: 9, size: 'S' },
-    { col: 33, row: 4, size: 'M' }, { col: 35, row: 8, size: 'S' }, { col: 37, row: 6, size: 'L' },
-    { col: 45, row: 3, size: 'S' }, { col: 48, row: 8, size: 'M' }, { col: 52, row: 5, size: 'L' },
-    { col: 56, row: 10, size: 'S' },
-
-    // --- Setor 2 (Meio) ---
-    { col: 12, row: 13, size: 'S' }, { col: 22, row: 14, size: 'M' }, { col: 35, row: 13, size: 'S' },
-    { col: 46, row: 15, size: 'L' }, { col: 50, row: 18, size: 'M' }, { col: 55, row: 13, size: 'S' },
-    { col: 8, row: 20, size: 'M' }, { col: 13, row: 20, size: 'L' }, { col: 16, row: 23, size: 'M' },
-    { col: 18, row: 20, size: 'S' }, { col: 25, row: 22, size: 'S' }, { col: 38, row: 20, size: 'M' },
-
-    // --- Setor 3 (Inferior) ---
-    { col: 5, row: 32, size: 'S' }, { col: 7, row: 35, size: 'S' }, { col: 14, row: 35, size: 'M' },
-    { col: 27, row: 32, size: 'M' }, { col: 30, row: 35, size: 'L' }, { col: 33, row: 31, size: 'S' },
-    { col: 45, row: 32, size: 'S' }, { col: 48, row: 36, size: 'L' }, { col: 54, row: 34, size: 'M' },
-    { col: 20, row: 40, size: 'M' }, { col: 38, row: 40, size: 'S' }, { col: 42, row: 39, size: 'M' },
+  // ── Paredes internas procedimentais (Minecraft cyberpunk style) ──
+  const hDividers = [
+    Math.floor(Math.random() * 5) + 12, // Ex: linha entre row 12 e 16
+    Math.floor(Math.random() * 5) + 26  // Ex: linha entre row 26 e 30
+  ];
+  const vDividers = [
+    Math.floor(Math.random() * 5) + 13, // Ex: coluna entre 13 e 17
+    Math.floor(Math.random() * 5) + 29, // Ex: coluna entre 29 e 33
+    Math.floor(Math.random() * 5) + 45  // Ex: coluna entre 45 e 49
   ];
 
-  const sizes = { S: 28, M: 40, L: 56 };
-  for (const def of boxDefs) {
-    const s = sizes[def.size];
-    pushables.push({
-      id: nextBoxId++,
-      x: hx + def.col * T, y: hy + def.row * T,
-      w: s, h: s,
-      size: def.size,
-      grabbedBy: null,
-      targetX: null, targetY: null,
-    });
+  // Gerar divisórias horizontais procedimentais com vãos de mínimo 6 tiles
+  for (const row of hDividers) {
+    let col = 1;
+    while (col < 61) {
+      const isWall = Math.random() < 0.6; // 60% chance de ser parede sólida
+      if (isWall) {
+        const wLen = Math.floor(Math.random() * 9) + 6; // tamanho 6 a 14 tiles
+        const endCol = Math.min(61, col + wLen);
+        const actualLen = endCol - col;
+        if (actualLen >= 3) {
+          addWall(hx + col * T, hy + row * T, actualLen * T, T);
+        }
+        col = endCol;
+      }
+      // Garante corredor livre de no mínimo 6 tiles (6 a 9 tiles sorteados)
+      const gapLen = Math.floor(Math.random() * 4) + 6;
+      col += gapLen;
+    }
   }
 
-  // Zonas de velocidade remapeadas
-  speedZones = [
-    { x: hx + 10 * T, y: hy + 6 * T, w: 5 * T, h: 4 * T, type: 'boost', label: '⚡ BOOST' },
-    { x: hx + 48 * T, y: hy + 6 * T, w: 5 * T, h: 4 * T, type: 'boost', label: '⚡ BOOST' },
-    { x: hx + 28 * T, y: hy + 10 * T, w: 6 * T, h: 3 * T, type: 'slow', label: '❄ SLOW' },
-    { x: hx + 6 * T, y: hy + 34 * T, w: 4 * T, h: 4 * T, type: 'boost', label: '⚡ BOOST' },
-    { x: hx + 52 * T, y: hy + 34 * T, w: 4 * T, h: 4 * T, type: 'boost', label: '⚡ BOOST' },
-    { x: hx + 28 * T, y: hy + 38 * T, w: 6 * T, h: 3 * T, type: 'slow', label: '❄ SLOW' },
+  // Gerar divisórias verticais procedimentais com vãos de mínimo 6 tiles
+  for (const col of vDividers) {
+    let row = 1;
+    while (row < 43) {
+      const isWall = Math.random() < 0.6; // 60% chance de ser parede sólida
+      if (isWall) {
+        const hLen = Math.floor(Math.random() * 9) + 6; // tamanho 6 a 14 tiles
+        const endRow = Math.min(43, row + hLen);
+        const actualLen = endRow - row;
+        if (actualLen >= 3) {
+          addWall(hx + col * T, hy + row * T, T, actualLen * T);
+        }
+        row = endRow;
+      }
+      // Garante corredor livre de no mínimo 6 tiles (6 a 9 tiles sorteados)
+      const gapLen = Math.floor(Math.random() * 4) + 6;
+      row += gapLen;
+    }
+  }
+
+  // Sorteia de 6 a 10 pilares táticos cibernéticos (1x1 ou 2x2 tiles)
+  const numPillars = Math.floor(Math.random() * 5) + 6; // 6 a 10
+  let pillarsAdded = 0;
+  let pillarAttempts = 0;
+  while (pillarsAdded < numPillars && pillarAttempts < 100) {
+    pillarAttempts++;
+    const col = Math.floor(Math.random() * 58) + 2; // de 2 a 59
+    const row = Math.floor(Math.random() * 40) + 2; // de 2 a 41
+    const size = Math.random() < 0.5 ? 1 : 2; // 1x1 ou 2x2
+    const px = hx + col * T;
+    const py = hy + row * T;
+    const pw = size * T;
+    const ph = size * T;
+
+    // Margem de 1 tile livre em volta do pilar para não trancar corredores
+    if (!collidesWithWalls(px - T, py - T, pw + 2 * T, ph + 2 * T)) {
+      addWall(px, py, pw, ph);
+      pillarsAdded++;
+    }
+  }
+
+  // Adicionar 4 Boosts e 2 Slows em áreas totalmente desobstruídas
+  const zonesToPlace = [
+    { type: 'boost', label: '⚡ BOOST' },
+    { type: 'boost', label: '⚡ BOOST' },
+    { type: 'boost', label: '⚡ BOOST' },
+    { type: 'boost', label: '⚡ BOOST' },
+    { type: 'slow', label: '❄ SLOW' },
+    { type: 'slow', label: '❄ SLOW' }
   ];
+
+  for (const zoneDef of zonesToPlace) {
+    let placed = false;
+    let attempts = 0;
+    const zw = zoneDef.type === 'boost' 
+      ? (Math.floor(Math.random() * 2) + 4) * T 
+      : (Math.floor(Math.random() * 2) + 5) * T;
+    const zh = zoneDef.type === 'boost' 
+      ? (Math.floor(Math.random() * 2) + 2) * T 
+      : 3 * T;
+
+    while (!placed && attempts < 100) {
+      attempts++;
+      const col = Math.floor(Math.random() * (60 - zw / T)) + 1;
+      const row = Math.floor(Math.random() * (42 - zh / T)) + 1;
+      const zx = hx + col * T;
+      const zy = hy + row * T;
+
+      let collides = false;
+      for (const wall of walls) {
+        if (rectOverlap(zx, zy, zw, zh, wall.x, wall.y, wall.w, wall.h)) {
+          collides = true;
+          break;
+        }
+      }
+      if (!collides) {
+        for (const existing of speedZones) {
+          if (rectOverlap(zx, zy, zw, zh, existing.x, existing.y, existing.w, existing.h)) {
+            collides = true;
+            break;
+          }
+        }
+      }
+
+      if (!collides) {
+        speedZones.push({ x: zx, y: zy, w: zw, h: zh, type: zoneDef.type, label: zoneDef.label });
+        placed = true;
+      }
+    }
+  }
+
+  // Adicionar as 37 caixas barricadas procedimentais (sizes S: 28px, M: 40px, L: 56px)
+  const boxSizesList = [];
+  for (let i = 0; i < 15; i++) boxSizesList.push('S');
+  for (let i = 0; i < 12; i++) boxSizesList.push('M');
+  for (let i = 0; i < 10; i++) boxSizesList.push('L');
+
+  const sizes = { S: 28, M: 40, L: 56 };
+
+  for (const size of boxSizesList) {
+    const s = sizes[size];
+    let placed = false;
+    let attempts = 0;
+    while (!placed && attempts < 150) {
+      attempts++;
+      const rx = hx + T + Math.random() * (hw - 2 * T - s);
+      const ry = hy + T + Math.random() * (hh - 2 * T - s);
+
+      // Margem de 2px livre em volta para que as caixas não nasçam coladas em paredes
+      if (!collidesWithWalls(rx - 2, ry - 2, s + 4, s + 4) &&
+          !collidesWithBoxes(rx - 2, ry - 2, s + 4, s + 4, -1)) {
+        pushables.push({
+          id: nextBoxId++,
+          x: rx, y: ry, w: s, h: s,
+          size: size,
+          grabbedBy: null,
+          targetX: null, targetY: null
+        });
+        placed = true;
+      }
+    }
+  }
 }
 
 generateMap();
@@ -190,14 +267,27 @@ function collidesWithBoxes(x, y, w, h, excludeId) {
 function findSpawnPos() {
   const hx = 3 * TILE + TILE, hy = 3 * TILE + TILE;
   const hw = 60 * TILE, hh = 42 * TILE;
-  for (let tries = 0; tries < 200; tries++) {
-    const x = hx + Math.random() * hw;
-    const y = hy + Math.random() * hh;
+  
+  // Camada 1: 300 tentativas livre de paredes e caixas
+  for (let tries = 0; tries < 300; tries++) {
+    const x = hx + Math.random() * (hw - PLAYER_SIZE);
+    const y = hy + Math.random() * (hh - PLAYER_SIZE);
     if (!collidesWithWalls(x, y, PLAYER_SIZE, PLAYER_SIZE) &&
         !collidesWithBoxes(x, y, PLAYER_SIZE, PLAYER_SIZE, -1)) {
       return { x, y };
     }
   }
+  
+  // Camada 2: 200 tentativas livre apenas de paredes (fallback)
+  for (let tries = 0; tries < 200; tries++) {
+    const x = hx + Math.random() * (hw - PLAYER_SIZE);
+    const y = hy + Math.random() * (hh - PLAYER_SIZE);
+    if (!collidesWithWalls(x, y, PLAYER_SIZE, PLAYER_SIZE)) {
+      return { x, y };
+    }
+  }
+
+  // Fallback absoluto
   return { x: hx + 100, y: hy + 100 };
 }
 
@@ -252,9 +342,46 @@ function getMapData() {
 function startWarmup() {
   gamePhase = Phase.WARMUP;
   phaseTimer = WARMUP_SECS * TICK_RATE;
-  // Limpa pickups ao iniciar aquecimento
   pickups = [];
-  broadcast({ type: 'phaseChange', phase: Phase.WARMUP, timer: WARMUP_SECS });
+  
+  // Regenera o mapa de forma procedimental
+  generateMap();
+
+  // Teleporta e reseta o estado de todos os jogadores ativos
+  for (const [, p] of players) {
+    const spawn = findSpawnPos();
+    p.x = spawn.x;
+    p.y = spawn.y;
+    p.isHot = false;
+    p.speed = RUNNER_SPEED;
+    p.alive = true;
+    p.grabbedBox = null;
+    p.mouseWorld = null;
+
+    // Reset de armas e mecânicas
+    p.ammo = 3;
+    p.reloadTimer = 0;
+    p.health = 100;
+    p.isStunned = false;
+    p.stunTimer = 0;
+    p.speedDebuffTimer = 0;
+    p.holdEnergy = 300;
+
+    // Reset Buffs v6
+    p.speedBoostTimer = 0;
+    p.machinegunTimer = 0;
+    p.shieldTimer = 0;
+    p.supernovaTimer = 0;
+    p.gravityTimer = 0;
+    p.invisibilityTimer = 0;
+    p.empTimer = 0;
+    p.stamina = 600;
+    p.isSprinting = false;
+    p.overdriveTimer = 0;
+    p.trackerTimer = 0;
+  }
+
+  broadcast({ type: 'phaseChange', phase: Phase.WARMUP, timer: WARMUP_SECS, map: getMapData() });
 }
 
 function startInGame() {
