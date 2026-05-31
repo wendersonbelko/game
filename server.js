@@ -234,6 +234,10 @@ function serializePlayer(p) {
     gravityTimer: p.gravityTimer,
     invisibilityTimer: p.invisibilityTimer,
     empTimer: p.empTimer,
+    stamina: p.stamina,
+    isSprinting: p.isSprinting,
+    overdriveTimer: p.overdriveTimer,
+    trackerTimer: p.trackerTimer,
   };
 }
 
@@ -270,6 +274,10 @@ function startInGame() {
     hotPlayer.shieldTimer = 0;
     hotPlayer.invisibilityTimer = 0;
     hotPlayer.empTimer = 0;
+    hotPlayer.stamina = 600;
+    hotPlayer.isSprinting = false;
+    hotPlayer.overdriveTimer = 0;
+    hotPlayer.trackerTimer = 0;
   }
   broadcast({ type: 'phaseChange', phase: Phase.INGAME, timer: GAME_SECS, hotAlphaId: hotId });
   // Spawna o primeiro pickup imediatamente ao começar a partida (dobro do inicial)
@@ -315,6 +323,10 @@ function resetGame() {
     p.gravityTimer = 0;
     p.invisibilityTimer = 0;
     p.empTimer = 0;
+    p.stamina = 600;
+    p.isSprinting = false;
+    p.overdriveTimer = 0;
+    p.trackerTimer = 0;
   }
   broadcast({ type: 'phaseChange', phase: Phase.LOBBY, timer: 0, map: getMapData() });
 
@@ -535,7 +547,7 @@ wss.on('connection', (ws) => {
         x: spawn.x, y: spawn.y,
         w: PLAYER_SIZE, h: PLAYER_SIZE,
         isHot: false, speed: RUNNER_SPEED, alive: true,
-        input: { up: false, down: false, left: false, right: false },
+        input: { up: false, down: false, left: false, right: false, shift: false },
         grabbedBox: null,
         mouseWorld: null,
 
@@ -556,6 +568,10 @@ wss.on('connection', (ws) => {
         gravityTimer: 0,
         invisibilityTimer: 0,
         empTimer: 0,
+        stamina: 600,
+        isSprinting: false,
+        overdriveTimer: 0,
+        trackerTimer: 0,
       };
 
       players.set(pId, currentPlayer);
@@ -585,6 +601,7 @@ wss.on('connection', (ws) => {
       currentPlayer.input.down = !!msg.down;
       currentPlayer.input.left = !!msg.left;
       currentPlayer.input.right = !!msg.right;
+      currentPlayer.input.shift = !!msg.shift;
     }
 
     // ── ATIRAR COM ARMA (Mecânica v5 + Metralhadora v6) ──
@@ -762,6 +779,30 @@ function gameTick() {
     if (p.gravityTimer > 0) p.gravityTimer--;
     if (p.invisibilityTimer > 0) p.invisibilityTimer--;
     if (p.empTimer > 0) p.empTimer--;
+    if (p.overdriveTimer > 0) p.overdriveTimer--;
+    if (p.trackerTimer > 0) p.trackerTimer--;
+
+    // Canhão Overdrive: munição infinita e sem recarga
+    if (p.overdriveTimer > 0) {
+      p.reloadTimer = 0;
+      p.ammo = 3;
+    }
+
+    // Mecânica de Corrida / Estamina (Shift)
+    // Jogador está correndo se segurar Shift e estiver se movendo
+    const isMoving = p.input.up || p.input.down || p.input.left || p.input.right;
+    if (p.input.shift && isMoving && !p.isStunned) {
+      if (p.stamina > 0) {
+        p.stamina = Math.max(0, p.stamina - 1);
+        p.isSprinting = true;
+      } else {
+        p.isSprinting = false;
+      }
+    } else {
+      // Recarga proporcional de estamina (15 segundos para carregar do 0 ao máximo de 600)
+      p.stamina = Math.min(600, p.stamina + 600 / (15 * TICK_RATE));
+      p.isSprinting = false;
+    }
   }
 
   // 4. Detecção de Coleta de Itens v6
@@ -792,6 +833,9 @@ function gameTick() {
           } else if (pickup.type === 'emp') {
             p.empTimer = 10 * TICK_RATE;
             collected = true;
+          } else if (pickup.type === 'tracker') {
+            p.trackerTimer = 10 * TICK_RATE;
+            collected = true;
           }
         } else {
           // Corredor coleta Speed, Metralhadora Burst, Escudo de Plasma ou Invisibilidade
@@ -806,6 +850,9 @@ function gameTick() {
             collected = true;
           } else if (pickup.type === 'invisibility') {
             p.invisibilityTimer = 12 * TICK_RATE;
+            collected = true;
+          } else if (pickup.type === 'overdrive') {
+            p.overdriveTimer = 10 * TICK_RATE;
             collected = true;
           }
         }
@@ -859,6 +906,14 @@ function gameTick() {
     // Supernova do Hot (+30%)
     if (p.isHot && p.supernovaTimer > 0) {
       speed *= 1.3;
+    }
+    // Sprint com Shift (+45% velocidade)
+    if (p.isSprinting) {
+      speed *= 1.45;
+    }
+    // Rastreador Térmico (+10% velocidade de perseguição)
+    if (p.isHot && p.trackerTimer > 0) {
+      speed *= 1.1;
     }
     // Aura de Gravidade (Corredor lento por 60% perto de Hot com Teia)
     if (!p.isHot) {

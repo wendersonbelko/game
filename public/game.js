@@ -30,6 +30,7 @@ const grabHint = document.getElementById('grabHint');
 // HUD v5
 const weaponHud = document.getElementById('weaponHud');
 const energyBar = document.getElementById('energyBar');
+const staminaBar = document.getElementById('staminaBar');
 const ammoContainer = document.getElementById('ammoContainer');
 const reloadAlert = document.getElementById('reloadAlert');
 
@@ -52,7 +53,7 @@ let camX = 0, camY = 0, shakeX = 0, shakeY = 0, shakeMag = 0;
 let particles = [];
 let laserBeams = []; // Linhas de laser estéticas `{ sx, sy, ex, ey, life, maxLife, color }`
 const targetPos = new Map();
-const keys = { up: false, down: false, left: false, right: false };
+const keys = { up: false, down: false, left: false, right: false, shift: false };
 let lastInputJson = '';
 
 // ── Áudio ──
@@ -215,12 +216,25 @@ window.addEventListener('keydown', e => {
     return;
   }
 
+  // Intercepta Shift para Correr
+  if (e.key === 'Shift') {
+    keys.shift = true;
+    e.preventDefault();
+  }
+
   const k = keyMap[e.key];
   if (k) { keys[k] = true; e.preventDefault(); }
 });
 
 window.addEventListener('keyup', e => {
   if (document.activeElement === nameInput || document.activeElement === chatInput) return;
+
+  // Intercepta soltura do Shift
+  if (e.key === 'Shift') {
+    keys.shift = false;
+    e.preventDefault();
+  }
+
   const k = keyMap[e.key];
   if (k) { keys[k] = false; e.preventDefault(); }
 });
@@ -462,12 +476,14 @@ function handleMessage(msg) {
         supernova: 'SUPERNOVA 🔥 (Calor & Velocidade)',
         gravity: 'AURA GRAVITACIONAL 🕸️ (Lentidão em área)',
         invisibility: 'CAMUFLAGEM HOLOGRÁFICA 👤 (Fique Invisível)',
-        emp: 'PULSO CYBER EMP ⚡ (Desativa armas/tether dos corredores)'
+        emp: 'PULSO CYBER EMP ⚡ (Desativa armas/tether dos corredores)',
+        overdrive: 'CANHÃO OVERDRIVE 🔫 (Munição Infinita & Sem Recarga!)',
+        tracker: 'RASTREADOR TÉRMICO 🎯 (Revela todos os corredores!)'
       };
       const label = itemNames[msg.itemType] || 'ITEM ESPECIAL';
       addFeedItem(`🎉 ${msg.playerName} coletou ${label}!`);
       
-      const itemColors = { speed: '#00ff88', machinegun: '#ffcc00', shield: '#00f0ff', supernova: '#ff2244', gravity: '#aa66ff', invisibility: '#ffffff', emp: '#ff00ff' };
+      const itemColors = { speed: '#00ff88', machinegun: '#ffcc00', shield: '#00f0ff', supernova: '#ff2244', gravity: '#aa66ff', invisibility: '#ffffff', emp: '#ff00ff', overdrive: '#ff3300', tracker: '#ff5555' };
       const col = itemColors[msg.itemType] || '#ffffff';
       
       // Burst de partículas de feedback de coleta no player
@@ -569,6 +585,12 @@ function updateWeaponHud() {
   // 1. Tether Energy Bar (0-300 ticks)
   const energyPercent = (me.holdEnergy / 300) * 100;
   energyBar.style.width = `${energyPercent}%`;
+
+  // 2. Estamina Bar (0-600 ticks)
+  if (staminaBar) {
+    const staminaPercent = ((me.stamina || 0) / 600) * 100;
+    staminaBar.style.width = `${staminaPercent}%`;
+  }
 
   // 2. Estilização e lógica baseadas no papel (Hot vs Runner)
   const ammoRow = ammoContainer.parentElement;
@@ -972,7 +994,9 @@ function drawPickups() {
       supernova: { label: '🔥 OVRDRV', color: '#ff2244' },
       gravity: { label: '🕸️ SLOW', color: '#aa66ff' },
       invisibility: { label: '👤 STEALTH', color: '#ffffff' },
-      emp: { label: '⚡ EMP', color: '#ff00ff' }
+      emp: { label: '⚡ EMP', color: '#ff00ff' },
+      overdrive: { label: '🔫 OVRDRV', color: '#ff3300' },
+      tracker: { label: '🎯 RADAR', color: '#ff5555' }
     };
     const cfg = types[pk.type] || types.speed;
     
@@ -1012,6 +1036,40 @@ function drawPlayers() {
     const isMe = id === myId;
     const sz = 28;
     const cx = p.x + sz/2, cy = p.y + sz/2;
+
+    // --- Efeito de Rastreador Térmico (Radar Lock-On para Hots) ---
+    const myPlayer = players.get(myId);
+    if (myPlayer && myPlayer.isHot && myPlayer.trackerTimer > 0 && !p.isHot) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255, 34, 68, 0.75)';
+      ctx.lineWidth = 1.8;
+      ctx.shadowColor = '#ff2244';
+      ctx.shadowBlur = 10;
+      
+      // Mira quadrada principal
+      ctx.strokeRect(cx - sz/2 - 4, cy - sz/2 - 4, sz + 8, sz + 8);
+      
+      // Cantos de mira cyberpunk reticular
+      ctx.fillStyle = '#ff2244';
+      ctx.fillRect(cx - sz/2 - 6, cy - sz/2 - 6, 6, 2);
+      ctx.fillRect(cx - sz/2 - 6, cy - sz/2 - 6, 2, 6);
+      ctx.fillRect(cx + sz/2, cy - sz/2 - 6, 6, 2);
+      ctx.fillRect(cx + sz/2 + 4, cy - sz/2 - 6, 2, 6);
+      ctx.fillRect(cx - sz/2 - 6, cy + sz/2 + 4, 6, 2);
+      ctx.fillRect(cx - sz/2 - 6, cy + sz/2, 2, 6);
+      ctx.fillRect(cx + sz/2, cy + sz/2 + 4, 6, 2);
+      ctx.fillRect(cx + sz/2 + 4, cy + sz/2, 2, 6);
+
+      // Linha guia tracejada Hot -> Corredor
+      ctx.strokeStyle = 'rgba(255, 34, 68, 0.25)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 5]);
+      ctx.beginPath();
+      ctx.moveTo(myPlayer.x + 14, myPlayer.y + 14);
+      ctx.lineTo(cx, cy);
+      ctx.stroke();
+      ctx.restore();
+    }
 
     // --- Efeito de Camuflagem Holográfica (Invisibilidade) ---
     const isInvisible = p.invisibilityTimer > 0;
@@ -1197,6 +1255,8 @@ function drawPlayers() {
     if (p.gravityTimer > 0) activeBuffs.push({ label: `🕸️ GRAVITY (${Math.ceil(p.gravityTimer/60)}s)`, color: '#aa66ff' });
     if (p.invisibilityTimer > 0 && isMe) activeBuffs.push({ label: `👤 STEALTH (${Math.ceil(p.invisibilityTimer/60)}s)`, color: '#ffffff' });
     if (p.empTimer > 0) activeBuffs.push({ label: `⚡ EMP HACK (${Math.ceil(p.empTimer/60)}s)`, color: '#ff00ff' });
+    if (p.overdriveTimer > 0) activeBuffs.push({ label: `🔫 OVERDRV (${Math.ceil(p.overdriveTimer/60)}s)`, color: '#ff3300' });
+    if (p.trackerTimer > 0) activeBuffs.push({ label: `🎯 RADAR (${Math.ceil(p.trackerTimer/60)}s)`, color: '#ff5555' });
 
     ctx.save();
     ctx.font = 'bold 8px Orbitron';
