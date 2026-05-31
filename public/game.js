@@ -42,11 +42,17 @@ const chatArea = document.getElementById('chatArea');
 const chatMessages = document.getElementById('chatMessages');
 const chatInput = document.getElementById('chatInput');
 
+// LOJA CYBERPUNK (v7)
+const shopPanel = document.getElementById('shopPanel');
+const shopCoins = document.getElementById('shopCoins');
+const shopItems = document.getElementById('shopItems');
+
 // ── Estado ──
 let ws = null, myId = null, gameMap = null;
 let players = new Map();
 let pushables = [];
 let activePickups = []; // Itens Cyberpunk v6
+let activeCoins = [];   // Moedas Cyberpunk v7
 let phase = 'lobby', timer = 0, runnersCount = 0, hotsCount = 0;
 let joined = false;
 let camX = 0, camY = 0, shakeX = 0, shakeY = 0, shakeMag = 0;
@@ -58,6 +64,62 @@ let lastInputJson = '';
 
 // ── Áudio ──
 let globalVolume = 0.20; // Volume mestre global [0..1]
+
+// Web Audio Synth SFX para Moedas e Compras (v7)
+let audioCtx = null;
+function initAudioContext() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+}
+document.addEventListener('click', initAudioContext, { once: true });
+document.addEventListener('keydown', initAudioContext, { once: true });
+
+function playCoinSfx() {
+  initAudioContext();
+  if (!audioCtx || globalVolume <= 0.001) return;
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume();
+  }
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  
+  osc.type = 'triangle';
+  osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(1320, audioCtx.currentTime + 0.08);
+  
+  gain.gain.setValueAtTime(globalVolume * 0.15, audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.12);
+  
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  
+  osc.start();
+  osc.stop(audioCtx.currentTime + 0.12);
+}
+
+function playBuySfx() {
+  initAudioContext();
+  if (!audioCtx || globalVolume <= 0.001) return;
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume();
+  }
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(523, audioCtx.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(784, audioCtx.currentTime + 0.12);
+  
+  gain.gain.setValueAtTime(globalVolume * 0.2, audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.18);
+  
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  
+  osc.start();
+  osc.stop(audioCtx.currentTime + 0.18);
+}
 
 const sfx10s = new Audio('10s.mp3');
 sfx10s.volume = globalVolume;
@@ -376,6 +438,7 @@ function handleMessage(msg) {
       phase = msg.phase;
       timer = msg.timer;
       activePickups = msg.pickups || []; // Carrega pickups já presentes no mapa
+      activeCoins = msg.coins || [];     // Carrega moedas já presentes no mapa
       players.clear();
       targetPos.clear();
       for (const p of msg.players) {
@@ -390,6 +453,7 @@ function handleMessage(msg) {
       runnersCount = msg.runnersCount; hotsCount = msg.hotsCount;
       if (msg.pushables) pushables = msg.pushables;
       if (msg.pickups !== undefined) activePickups = msg.pickups; // Captura drops v6!
+      if (msg.coins !== undefined) activeCoins = msg.coins;     // Captura moedas v7!
 
       const ids = new Set();
       for (const sp of msg.players) {
@@ -414,7 +478,10 @@ function handleMessage(msg) {
       phase = msg.phase; timer = msg.timer || 0;
       if (msg.map) { gameMap = msg.map; pushables = msg.map.pushables; }
       // Limpa pickups ao mudar para lobby/warmup
-      if (phase === 'lobby' || phase === 'warmup') activePickups = [];
+      if (phase === 'lobby' || phase === 'warmup') {
+        activePickups = [];
+        activeCoins = [];
+      }
       // Reseta flag do alerta de 10s a cada nova partida
       alert10sFired = false;
       endScreen.classList.add('hidden');
@@ -482,6 +549,35 @@ function handleMessage(msg) {
 
     case 'itemSpawned':
       spawnImpactSpark(msg.item.x + 10, msg.item.y + 10, '#00ff88');
+      break;
+
+    case 'coinSpawned':
+      spawnImpactSpark(msg.coin.x + 8, msg.coin.y + 8, '#ffcc00');
+      break;
+
+    case 'coinCollected':
+      activeCoins = activeCoins.filter(c => c.id !== msg.coinId);
+      const collector = players.get(msg.playerId);
+      if (collector) {
+        for (let k = 0; k < 15; k++) {
+          spawnParticle(collector.x + 14, collector.y + 14, '#ffcc00', 20 + Math.random()*15, 3.5);
+        }
+      }
+      addFeedItem(`🪙 ${msg.playerName} coletou uma Moeda Dourada!`);
+      playCoinSfx();
+      break;
+
+    case 'itemBought':
+      if (msg.playerId === myId) {
+        addFeedItem(`🛒 Compra efetuada com sucesso!`);
+        playBuySfx();
+      }
+      const buyer = players.get(msg.playerId);
+      if (buyer) {
+        for (let k = 0; k < 25; k++) {
+          spawnParticle(buyer.x + 14, buyer.y + 14, '#00f0ff', 25 + Math.random()*15, 4.5);
+        }
+      }
       break;
 
     case 'collected':
@@ -686,6 +782,94 @@ function updateWeaponHud() {
       updateSlot(slotEEl, me.slotE);
     }
   }
+
+  // 4. Atualiza a Cyber-Loja lateral
+  updateShopUI();
+}
+
+let currentShopRole = null;
+function updateShopUI() {
+  const me = players.get(myId);
+  if (!me || !joined) {
+    shopPanel.classList.add('hidden');
+    return;
+  }
+
+  shopPanel.classList.remove('hidden');
+  shopCoins.textContent = `🪙 ${me.coins || 0}`;
+
+  const myRole = me.isHot ? 'hot' : 'runner';
+  if (currentShopRole !== myRole) {
+    currentShopRole = myRole;
+    shopItems.innerHTML = '';
+
+    const runnerItems = [
+      { id: 'speed', name: '⚡ VELOCIDADE', desc: 'Super Velocidade (+40%)', price: 3 },
+      { id: 'blink', name: '⚡ BLINK', desc: 'Teleporte Curto (160px)', price: 3 },
+      { id: 'shield', name: '🛡️ PLASMA SHIELD', desc: 'Escudo Protetor', price: 4 },
+      { id: 'machinegun', name: '🔫 BURST LASER', desc: 'Metralhadora Burst', price: 4 },
+      { id: 'phaseshift', name: '🌀 PHASE SHIFT', desc: 'Atravessa Paredes (4s)', price: 5 },
+      { id: 'invisibility', name: '👤 CHAMELEON', desc: 'Invisibilidade (12s)', price: 5 },
+    ];
+
+    const hotItems = [
+      { id: 'speed', name: '⚡ VELOCIDADE', desc: 'Super Velocidade (+40%)', price: 3 },
+      { id: 'tracker', name: '🎯 THERMAL RADAR', desc: 'Mira Neon Lock-On (10s)', price: 3 },
+      { id: 'gravity', name: '🕸️ AURA GRAVIDADE', desc: 'Desacelera Corredores', price: 4 },
+      { id: 'supernova', name: '🔥 SUPERNOVA', desc: 'Raio Contágio Ampliado', price: 4 },
+      { id: 'emp', name: '⚡ EMP HACK', desc: 'Desativa Armas/Tethers', price: 5 },
+    ];
+
+    const items = me.isHot ? hotItems : runnerItems;
+
+    for (const item of items) {
+      const row = document.createElement('div');
+      row.className = 'shop-item';
+      row.dataset.id = item.id;
+      row.dataset.price = item.price;
+
+      const info = document.createElement('div');
+      info.className = 'shop-item-info';
+
+      const name = document.createElement('span');
+      name.className = 'shop-item-name';
+      name.textContent = item.name;
+
+      const desc = document.createElement('span');
+      desc.className = 'shop-item-desc';
+      desc.textContent = item.desc;
+
+      info.appendChild(name);
+      info.appendChild(desc);
+
+      const price = document.createElement('span');
+      price.className = 'shop-item-price';
+      price.textContent = `🪙 ${item.price}`;
+
+      row.appendChild(info);
+      row.appendChild(price);
+
+      row.addEventListener('click', () => {
+        if (row.classList.contains('disabled')) return;
+        ws.send(JSON.stringify({ type: 'buyItem', itemId: item.id }));
+      });
+
+      shopItems.appendChild(row);
+    }
+  }
+
+  // Atualiza habilitado/desabilitado dos itens
+  const myCoins = me.coins || 0;
+  const slotsFull = !me.isHot && me.slotQ && me.slotE;
+
+  for (const itemDiv of shopItems.children) {
+    const price = parseInt(itemDiv.dataset.price);
+    if (myCoins < price || slotsFull) {
+      itemDiv.classList.add('disabled');
+    } else {
+      itemDiv.classList.remove('disabled');
+    }
+  }
 }
 
 // ── Lista de Jogadores Dinâmica (v5) ──
@@ -857,6 +1041,7 @@ function render() {
   drawTethers();
   drawBoxes3D();
   drawPickups(); // Desenha itens dropados cyberpunk v6
+  drawCoins();   // Desenha as moedas 3D cyberpunk v7
   drawPlayers();
   drawLasers();
   drawParticles();
@@ -1083,6 +1268,47 @@ function drawPickups() {
     ctx.font = 'bold 9px Rajdhani';
     ctx.textAlign = 'center';
     ctx.fillText(cfg.label, cx, pk.y - 12 + floatOffset);
+    ctx.restore();
+  }
+}
+
+// ── Desenhar Moedas Cyberpunk v7 ──
+function drawCoins() {
+  for (const c of activeCoins) {
+    const cx = c.x + 8;
+    const cy = c.y + 8;
+    
+    // Animação de flutuação e rotação 3D vertical
+    const floatOffset = Math.sin(Date.now() / 200 + c.x) * 3;
+    const rotateScale = Math.sin(Date.now() / 300);
+    
+    ctx.save();
+    ctx.translate(cx, cy + floatOffset);
+    ctx.scale(Math.abs(rotateScale) < 0.15 ? 0.15 : rotateScale, 1);
+    
+    ctx.shadowBlur = 12;
+    ctx.shadowColor = '#ffcc00';
+    ctx.fillStyle = '#ffcc00';
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.5;
+    
+    ctx.beginPath();
+    ctx.arc(0, 0, 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    
+    // Detalhe interno da moeda
+    ctx.strokeStyle = '#e5a900';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(0, 0, 4, 0, Math.PI * 2);
+    ctx.stroke();
+    
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 7px Rajdhani';
+    ctx.textAlign = 'center';
+    ctx.fillText('$', 0, 2.5);
+    
     ctx.restore();
   }
 }

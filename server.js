@@ -56,6 +56,12 @@ let nextPickupId = 1;
 const PICKUP_SPAWN_INTERVAL = 7.5 * TICK_RATE; // a cada 7.5 segundos (o dobro da taxa atual)
 let pickupSpawnTimer = PICKUP_SPAWN_INTERVAL;
 
+// Economia de Moedas v7
+let coins = [];
+let nextCoinId = 1;
+const COIN_SPAWN_INTERVAL = 5 * TICK_RATE; // a cada 5 segundos
+let coinSpawnTimer = COIN_SPAWN_INTERVAL;
+
 // ─── Geração do Mapa ───
 function addWall(x, y, w, h) {
   walls.push({ x, y, w, h });
@@ -333,6 +339,9 @@ function serializePlayer(p) {
     slotQ: p.slotQ,
     slotE: p.slotE,
     phaseshiftTimer: p.phaseshiftTimer,
+
+    // Economia v8
+    coins: p.coins || 0,
   };
 }
 
@@ -348,6 +357,8 @@ function startWarmup() {
   gamePhase = Phase.WARMUP;
   phaseTimer = WARMUP_SECS * TICK_RATE;
   pickups = [];
+  coins = [];
+  coinSpawnTimer = COIN_SPAWN_INTERVAL;
   
   // Regenera o mapa de forma procedimental
   generateMap();
@@ -389,6 +400,9 @@ function startWarmup() {
     p.slotQ = null;
     p.slotE = null;
     p.phaseshiftTimer = 0;
+
+    // Reset Economia v8
+    p.coins = 0;
   }
 
   broadcast({ type: 'phaseChange', phase: Phase.WARMUP, timer: WARMUP_SECS, map: getMapData() });
@@ -436,6 +450,8 @@ function resetGame() {
   phaseTimer = 0; winner = null;
   pickups = [];
   pickupSpawnTimer = PICKUP_SPAWN_INTERVAL;
+  coins = [];
+  coinSpawnTimer = COIN_SPAWN_INTERVAL;
   generateMap();
   for (const [, p] of players) {
     const spawn = findSpawnPos();
@@ -469,6 +485,9 @@ function resetGame() {
     p.slotQ = null;
     p.slotE = null;
     p.phaseshiftTimer = 0;
+
+    // Reset Economia v8
+    p.coins = 0;
   }
   broadcast({ type: 'phaseChange', phase: Phase.LOBBY, timer: 0, map: getMapData() });
 
@@ -524,6 +543,51 @@ function spawnRandomPickup() {
       broadcast({ type: 'itemSpawned', item });
     }
   }
+}
+
+// ─── Geração de Moedas v7 ───
+function spawnRandomCoin() {
+  if (coins.length >= 15) return; // Limite de 15 moedas simultâneas
+
+  const hx = 3 * TILE, hy = 3 * TILE;
+  const hw = 62 * TILE, hh = 44 * TILE;
+
+  let spawned = false;
+  let attempts = 0;
+  while (!spawned && attempts < 100) {
+    attempts++;
+    const rx = hx + TILE + Math.random() * (hw - 3 * TILE);
+    const ry = hy + TILE + Math.random() * (hh - 3 * TILE);
+
+    if (!collidesWithWalls(rx - 8, ry - 8, 16, 16) && 
+        !collidesWithBoxes(rx - 8, ry - 8, 16, 16, -1)) {
+      
+      const coin = {
+        id: 'coin_' + nextCoinId++,
+        x: rx - 8,
+        y: ry - 8,
+        w: 16,
+        h: 16
+      };
+      coins.push(coin);
+      spawned = true;
+      
+      broadcast({ type: 'coinSpawned', coin });
+    }
+  }
+}
+
+function spawnCoinAt(x, y) {
+  if (coins.length >= 15) return;
+  const coin = {
+    id: 'coin_' + nextCoinId++,
+    x: x - 8,
+    y: y - 8,
+    w: 16,
+    h: 16
+  };
+  coins.push(coin);
+  broadcast({ type: 'coinSpawned', coin });
 }
 
 // ─── Disparo com Raycast Reutilizável v6 ───
@@ -638,6 +702,10 @@ function performRaycast(currentPlayer, tx, ty, angleOffset = 0, isMachinegun = f
       if (playerHit.isHot && !playerHit.isStunned) {
         // Metralhadora causa 15 por tiro (45 total se acertar o spray triplo!), tiro normal tira 34
         playerHit.health -= isMachinegun ? 15 : 34;
+        
+        // NOVO: Dropar moeda ao tomar tiro!
+        spawnCoinAt(playerHit.x + PLAYER_SIZE / 2, playerHit.y + PLAYER_SIZE / 2);
+
         if (playerHit.health <= 0) {
           playerHit.health = 0;
           playerHit.isStunned = true;
@@ -719,6 +787,9 @@ wss.on('connection', (ws) => {
         slotQ: null,
         slotE: null,
         phaseshiftTimer: 0,
+
+        // --- Economia v8 ---
+        coins: 0,
       };
 
       players.set(pId, currentPlayer);
@@ -732,6 +803,7 @@ wss.on('connection', (ws) => {
         timer: Math.ceil(phaseTimer / TICK_RATE),
         colors: PLAYER_COLORS,
         pickups: pickups.map(pk => ({ id: pk.id, x: pk.x, y: pk.y, type: pk.type })),
+        coins: coins.map(c => ({ id: c.id, x: c.x, y: c.y })),
       }));
 
       broadcast({ type: 'playerJoined', player: serializePlayer(currentPlayer) });
@@ -893,6 +965,48 @@ wss.on('connection', (ws) => {
         broadcast({ type: 'powerActivated', playerId: currentPlayer.id, powerType: 'invisibility' });
       }
     }
+
+    if (msg.type === 'buyItem') {
+      if (currentPlayer.isStunned) return;
+      
+      const itemId = msg.itemId;
+      const runnerPrices = { speed: 3, blink: 3, shield: 4, machinegun: 4, phaseshift: 5, invisibility: 5 };
+      const hotPrices = { speed: 3, tracker: 3, gravity: 4, supernova: 4, emp: 5 };
+      
+      const prices = currentPlayer.isHot ? hotPrices : runnerPrices;
+      const price = prices[itemId];
+      if (price === undefined) return;
+      
+      if ((currentPlayer.coins || 0) < price) return;
+      
+      if (!currentPlayer.isHot) {
+        if (currentPlayer.slotQ && currentPlayer.slotE) return; // Sem espaço nos slots Q e E
+      }
+      
+      currentPlayer.coins -= price;
+      
+      if (!currentPlayer.isHot) {
+        if (!currentPlayer.slotQ) {
+          currentPlayer.slotQ = itemId;
+        } else {
+          currentPlayer.slotE = itemId;
+        }
+        broadcast({ type: 'itemBought', playerId: currentPlayer.id, itemId, coins: currentPlayer.coins });
+      } else {
+        if (itemId === 'speed') {
+          currentPlayer.speedBoostTimer = 15 * TICK_RATE;
+        } else if (itemId === 'tracker') {
+          currentPlayer.trackerTimer = 10 * TICK_RATE;
+        } else if (itemId === 'gravity') {
+          currentPlayer.gravityTimer = 12 * TICK_RATE;
+        } else if (itemId === 'supernova') {
+          currentPlayer.supernovaTimer = 10 * TICK_RATE;
+        } else if (itemId === 'emp') {
+          currentPlayer.empTimer = 10 * TICK_RATE;
+        }
+        broadcast({ type: 'itemBought', playerId: currentPlayer.id, itemId, coins: currentPlayer.coins });
+      }
+    }
   });
 
   ws.on('close', () => {
@@ -934,12 +1048,18 @@ function gameTick() {
     }
   }
 
-  // 2. Spawning dinâmico de itens a cada 15 segundos — apenas durante a partida!
+  // 2. Spawning dinâmico de itens e moedas — apenas durante a partida!
   if (gamePhase === Phase.INGAME) {
     pickupSpawnTimer--;
     if (pickupSpawnTimer <= 0) {
       pickupSpawnTimer = PICKUP_SPAWN_INTERVAL;
       spawnRandomPickup();
+    }
+
+    coinSpawnTimer--;
+    if (coinSpawnTimer <= 0) {
+      coinSpawnTimer = COIN_SPAWN_INTERVAL;
+      spawnRandomCoin();
     }
   }
 
@@ -1076,6 +1196,35 @@ function gameTick() {
           pickups.splice(i, 1);
           break; // sai do loop de jogadores para este pickup
         }
+      }
+    }
+  }
+
+  // 4b. Detecção de Coleta de Moedas v7
+  for (let i = coins.length - 1; i >= 0; i--) {
+    const coin = coins[i];
+    for (const [, p] of players) {
+      if (p.isStunned) continue;
+      const px = p.x + PLAYER_SIZE / 2;
+      const py = p.y + PLAYER_SIZE / 2;
+      const cx = coin.x + 8;
+      const cy = coin.y + 8;
+      const dist = Math.sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy));
+
+      if (dist < 22) { // Colisão!
+        p.coins = (p.coins || 0) + 1;
+        
+        broadcast({
+          type: 'coinCollected',
+          playerId: p.id,
+          playerName: p.name,
+          coins: p.coins,
+          coinId: coin.id,
+          color: p.color
+        });
+        
+        coins.splice(i, 1);
+        break; // sai do loop de jogadores para esta moeda
       }
     }
   }
@@ -1280,7 +1429,8 @@ function gameTick() {
       timer: Math.ceil(phaseTimer / TICK_RATE),
       runnersCount: [...players.values()].filter(p => !p.isHot).length,
       hotsCount: [...players.values()].filter(p => p.isHot).length,
-      pickups: pickups.map(pk => ({ id: pk.id, x: pk.x, y: pk.y, type: pk.type })) // Envia os drops ativos
+      pickups: pickups.map(pk => ({ id: pk.id, x: pk.x, y: pk.y, type: pk.type })), // Envia os drops ativos
+      coins: coins.map(c => ({ id: c.id, x: c.x, y: c.y })) // Envia as moedas ativas
     });
   }
 }
