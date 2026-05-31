@@ -442,12 +442,14 @@ function handleMessage(msg) {
         machinegun: 'METRALHADORA BURST 🔫 (Rajada Tripla)',
         shield: 'ESCUDO DE PLASMA 🛡️ (Absorve infecção)',
         supernova: 'SUPERNOVA 🔥 (Calor & Velocidade)',
-        gravity: 'AURA GRAVITACIONAL 🕸️ (Lentidão em área)'
+        gravity: 'AURA GRAVITACIONAL 🕸️ (Lentidão em área)',
+        invisibility: 'CAMUFLAGEM HOLOGRÁFICA 👤 (Fique Invisível)',
+        emp: 'PULSO CYBER EMP ⚡ (Desativa armas/tether dos corredores)'
       };
       const label = itemNames[msg.itemType] || 'ITEM ESPECIAL';
       addFeedItem(`🎉 ${msg.playerName} coletou ${label}!`);
       
-      const itemColors = { speed: '#00ff88', machinegun: '#ffcc00', shield: '#00f0ff', supernova: '#ff2244', gravity: '#aa66ff' };
+      const itemColors = { speed: '#00ff88', machinegun: '#ffcc00', shield: '#00f0ff', supernova: '#ff2244', gravity: '#aa66ff', invisibility: '#ffffff', emp: '#ff00ff' };
       const col = itemColors[msg.itemType] || '#ffffff';
       
       // Burst de partículas de feedback de coleta no player
@@ -822,7 +824,7 @@ function drawFloor() {
   const sc = Math.floor(camX / T), sr = Math.floor(camY / T);
   const ec = Math.ceil((camX + canvas.width) / T), er = Math.ceil((camY + canvas.height) / T);
 
-  const hx = 3*T, hy = 2*T, hw = 44*T, hh = 32*T;
+  const hx = 3*T, hy = 3*T, hw = 62*T, hh = 44*T;
   ctx.fillStyle = '#0c0c18';
   ctx.fillRect(hx, hy, hw, hh);
 
@@ -948,7 +950,9 @@ function drawPickups() {
       machinegun: { label: '🔫 BURST', color: '#ffcc00' },
       shield: { label: '🛡️ SHIELD', color: '#00f0ff' },
       supernova: { label: '🔥 OVRDRV', color: '#ff2244' },
-      gravity: { label: '🕸️ SLOW', color: '#aa66ff' }
+      gravity: { label: '🕸️ SLOW', color: '#aa66ff' },
+      invisibility: { label: '👤 STEALTH', color: '#ffffff' },
+      emp: { label: '⚡ EMP', color: '#ff00ff' }
     };
     const cfg = types[pk.type] || types.speed;
     
@@ -988,6 +992,22 @@ function drawPlayers() {
     const isMe = id === myId;
     const sz = 28;
     const cx = p.x + sz/2, cy = p.y + sz/2;
+
+    // --- Efeito de Camuflagem Holográfica (Invisibilidade) ---
+    const isInvisible = p.invisibilityTimer > 0;
+    if (isInvisible && !isMe) {
+      // Outros jogadores só veem um vulto muito sutil sem nome/tags
+      ctx.save();
+      ctx.globalAlpha = 0.06;
+      ctx.beginPath();
+      ctx.arc(cx, cy, sz/2, 0, Math.PI * 2);
+      ctx.fillStyle = p.color || '#00f0ff';
+      ctx.fill();
+      ctx.strokeStyle = p.color || '#44ccff';
+      ctx.stroke();
+      ctx.restore();
+      continue; // Ignora o resto do desenho (nome, tether, buffs, etc.)
+    }
 
     // --- Partículas de Trails de Itens/Buffs v6 ---
     if (p.isHot && !p.isStunned) spawnHotTrail(p.x, p.y);
@@ -1033,7 +1053,46 @@ function drawPlayers() {
       }
     }
 
+    // 2. Aura Cyber EMP do Hot (200px de raio magenta neon)
+    if (p.isHot && p.empTimer > 0) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,0,255,0.3)';
+      ctx.lineWidth = 3 + Math.sin(Date.now() / 80) * 1.5;
+      ctx.shadowColor = '#ff00ff';
+      ctx.shadowBlur = 15;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 200, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Desenha pequenos raios elétricos no raio de 200px
+      for (let k = 0; k < 3; k++) {
+        const angle = Math.random() * Math.PI * 2;
+        const rStart = sz/2;
+        const rEnd = 200;
+        ctx.strokeStyle = 'rgba(255,100,255,0.6)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        let lx = cx + Math.cos(angle) * rStart;
+        let ly = cy + Math.sin(angle) * rStart;
+        ctx.moveTo(lx, ly);
+        
+        const steps = 4;
+        for (let s = 1; s <= steps; s++) {
+          const stepR = rStart + (rEnd - rStart) * (s / steps);
+          const deviation = (Math.random() - 0.5) * 40;
+          const sx_lightning = cx + Math.cos(angle) * stepR + Math.sin(angle) * deviation;
+          const sy_lightning = cy + Math.sin(angle) * stepR - Math.cos(angle) * deviation;
+          ctx.lineTo(sx_lightning, sy_lightning);
+        }
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
     ctx.save();
+    if (isInvisible && isMe) {
+      ctx.globalAlpha = 0.4; // Sua própria transparência
+    }
 
     // 2. Glow principal do player
     if (p.isStunned) {
@@ -1116,6 +1175,8 @@ function drawPlayers() {
     if (p.shieldTimer > 0) activeBuffs.push({ label: `🛡️ SHIELD (${Math.ceil(p.shieldTimer/60)}s)`, color: '#00f0ff' });
     if (p.supernovaTimer > 0) activeBuffs.push({ label: `🔥 SUPERNOVA (${Math.ceil(p.supernovaTimer/60)}s)`, color: '#ff2244' });
     if (p.gravityTimer > 0) activeBuffs.push({ label: `🕸️ GRAVITY (${Math.ceil(p.gravityTimer/60)}s)`, color: '#aa66ff' });
+    if (p.invisibilityTimer > 0 && isMe) activeBuffs.push({ label: `👤 STEALTH (${Math.ceil(p.invisibilityTimer/60)}s)`, color: '#ffffff' });
+    if (p.empTimer > 0) activeBuffs.push({ label: `⚡ EMP HACK (${Math.ceil(p.empTimer/60)}s)`, color: '#ff00ff' });
 
     ctx.save();
     ctx.font = 'bold 8px Orbitron';

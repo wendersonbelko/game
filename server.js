@@ -2,14 +2,14 @@
  * BraainHot — Server v6
  * Servidor Único Autorizativo (Máximo 20 jogadores)
  * Aguarda 3 jogadores para iniciar Aquecimento de 60 segundos.
- * Após o Aquecimento, inicia Partida de 7 minutos.
+ * Após o Aquecimento, inicia Partida de 2 minutos.
  * Com Arma para Corredores (3 tiros seguidos, 5s recarga, reduz velocidade e empurra).
  * Sangue do Hot (100 HP, 3 hits paralisam por 10s).
  * Limite de Arrasto de Caixas (5s de tether max, recarrega solto, Hots recarregam 2x mais rápido).
  * Bate-papo por sessão e painel de jogadores.
  * 
  * NOVO NA V6:
- * Sistema de Drop de Itens Cyberpunk Aleatórios (Metralhadora Burst, Escudo de Plasma, Supernova, Aura Gravitacional, Super Velocidade).
+ * Sistema de Drop de Itens Cyberpunk Aleatórios (Metralhadora Burst, Escudo de Plasma, Supernova, Aura Gravitacional, Super Velocidade, Camuflagem Holográfica, Pulso Cyber EMP).
  */
 const express = require('express');
 const http = require('http');
@@ -22,13 +22,13 @@ const TICK_MS = 1000 / TICK_RATE;
 const BROADCAST_EVERY = 3; // a cada 3 ticks = 20hz
 
 const TILE = 40;
-const MAP_W = 2000;
-const MAP_H = 1520;
+const MAP_W = 2720;
+const MAP_H = 2000;
 const PLAYER_SIZE = 28;
 const RUNNER_SPEED = 3.0;
 const HOT_SPEED = 3.4;
 const WARMUP_SECS = 20; // 20 segundos de aquecimento antes da caçada
-const GAME_SECS = 420; // 7 minutos de caçada
+const GAME_SECS = 120; // 2 minutos de caçada
 const ENDGAME_SECS = 8;
 const MIN_PLAYERS_TO_START = 3;
 const MAX_PLAYERS = 20;
@@ -53,7 +53,7 @@ let nextPlayerId = 1;
 // Itens Drops v6
 let pickups = [];
 let nextPickupId = 1;
-const PICKUP_SPAWN_INTERVAL = 15 * TICK_RATE; // a cada 15 segundos
+const PICKUP_SPAWN_INTERVAL = 7.5 * TICK_RATE; // a cada 7.5 segundos (o dobro da taxa atual)
 let pickupSpawnTimer = PICKUP_SPAWN_INTERVAL;
 
 // ─── Geração do Mapa ───
@@ -74,67 +74,71 @@ function generateMap() {
   addWall(0, 0, T, MAP_H);
   addWall(MAP_W - T, 0, T, MAP_H);
 
-  // ── Paredes externas da casa ──
-  const hx = 3 * T, hy = 2 * T;
-  const hw = 44 * T, hh = 32 * T;
+  // ── Paredes externas da casa (Expandidas de 44x32 para 62x44) ──
+  const hx = 3 * T, hy = 3 * T;
+  const hw = 62 * T, hh = 44 * T;
   const hx2 = hx + hw, hy2 = hy + hh;
 
   addWall(hx, hy, hw, T);
   addWall(hx, hy, T, hh);
   addWall(hx2 - T, hy, T, hh);
   
-  // Porta de entrada = gap de 4 tiles
-  addWall(hx, hy2 - T, 18 * T, T);
-  addWall(hx + 22 * T, hy2 - T, 22 * T, T);
+  // Porta de entrada = gap de 4 tiles no meio da parede inferior
+  addWall(hx, hy2 - T, 28 * T, T);
+  addWall(hx + 32 * T, hy2 - T, 30 * T, T);
 
-  // ── Paredes internas ──
-  const divY1 = hy + 11 * T;
-  addWall(hx + T, divY1, 8 * T, T);
-  addWall(hx + 11 * T, divY1, 10 * T, T);
-  addWall(hx + 23 * T, divY1, 8 * T, T);
-  addWall(hx + 33 * T, divY1, 10 * T, T);
+  // ── Paredes internas (Redesenhadas para Loops e Corredores de Caçada) ──
+  // Divisória Horizontal 1
+  addWall(hx + T, hy + 14 * T, 15 * T, T);
+  addWall(hx + 22 * T, hy + 14 * T, 18 * T, T);
+  addWall(hx + 46 * T, hy + 14 * T, 15 * T, T);
 
-  const divY2 = hy + 17 * T;
-  addWall(hx + T, divY2, 6 * T, T);
-  addWall(hx + 9 * T, divY2, 8 * T, T);
-  addWall(hx + 19 * T, divY2, 10 * T, T);
-  addWall(hx + 31 * T, divY2, 12 * T, T);
+  // Divisória Horizontal 2
+  addWall(hx + T, hy + 28 * T, 10 * T, T);
+  addWall(hx + 16 * T, hy + 28 * T, 20 * T, T);
+  addWall(hx + 42 * T, hy + 28 * T, 19 * T, T);
 
-  // Verticais
-  const vx1 = hx + 14 * T;
-  addWall(vx1, hy + T, T, 4 * T);
-  addWall(vx1, hy + 7 * T, T, 4 * T);
+  // Divisórias Verticais (Garantem rotas de fuga e loops verticais)
+  addWall(hx + 18 * T, hy + T, T, 8 * T);
+  addWall(hx + 18 * T, hy + 15 * T, T, 7 * T);
+  addWall(hx + 18 * T, hy + 29 * T, T, 8 * T);
 
-  const vx2 = hx + 30 * T;
-  addWall(vx2, hy + T, T, 3 * T);
-  addWall(vx2, hy + 6 * T, T, 5 * T);
+  addWall(hx + 42 * T, hy + T, T, 9 * T);
+  addWall(hx + 42 * T, hy + 15 * T, T, 9 * T);
+  addWall(hx + 42 * T, hy + 29 * T, T, 10 * T);
 
-  const vx3 = hx + 10 * T;
-  addWall(vx3, divY2 + T, T, 4 * T);
-  addWall(vx3, divY2 + 7 * T, T, 7 * T);
+  // Colunas de tecnologia no centro do mapa (Loop rápido)
+  addWall(hx + 26 * T, hy + 18 * T, 2 * T, 2 * T);
+  addWall(hx + 34 * T, hy + 18 * T, 2 * T, 2 * T);
+  addWall(hx + 26 * T, hy + 24 * T, 2 * T, 2 * T);
+  addWall(hx + 34 * T, hy + 24 * T, 2 * T, 2 * T);
 
-  const vx4 = hx + 24 * T;
-  addWall(vx4, divY2 + T, T, 5 * T);
-  addWall(vx4, divY2 + 8 * T, T, 6 * T);
-
-  // Móveis fixos
+  // Móveis fixos / Barreiras adicionais em salas externas
   addWall(hx + 2 * T, hy + 2 * T, 5 * T, T);
-  addWall(hx + 18 * T, hy + 5 * T, 4 * T, 2 * T);
-  addWall(hx + 38 * T, hy + 2 * T, 4 * T, 3 * T);
-  addWall(hx + 36 * T, divY2 + 3 * T, 4 * T, 3 * T);
-  addWall(hx + 2 * T, divY2 + 3 * T, 2 * T, T);
+  addWall(hx + 55 * T, hy + 2 * T, 5 * T, T);
+  addWall(hx + 2 * T, hy + 40 * T, 5 * T, T);
+  addWall(hx + 55 * T, hy + 40 * T, 5 * T, T);
 
-  // Caixas empurráveis (tamanhos variados)
+  // Caixas empurráveis (Expandido para 37 caixas no total!)
   const boxDefs = [
+    // --- Setor 1 (Superior) ---
     { col: 5, row: 5, size: 'S' }, { col: 8, row: 3, size: 'M' }, { col: 10, row: 8, size: 'S' },
     { col: 17, row: 3, size: 'L' }, { col: 24, row: 8, size: 'M' }, { col: 20, row: 9, size: 'S' },
     { col: 33, row: 4, size: 'M' }, { col: 35, row: 8, size: 'S' }, { col: 37, row: 6, size: 'L' },
+    { col: 45, row: 3, size: 'S' }, { col: 48, row: 8, size: 'M' }, { col: 52, row: 5, size: 'L' },
+    { col: 56, row: 10, size: 'S' },
+
+    // --- Setor 2 (Meio) ---
     { col: 12, row: 13, size: 'S' }, { col: 22, row: 14, size: 'M' }, { col: 35, row: 13, size: 'S' },
-    { col: 5, row: 22, size: 'S' }, { col: 7, row: 25, size: 'S' },
-    { col: 13, row: 20, size: 'L' }, { col: 16, row: 23, size: 'M' }, { col: 18, row: 20, size: 'S' },
-    { col: 14, row: 25, size: 'M' },
-    { col: 27, row: 22, size: 'M' }, { col: 30, row: 25, size: 'L' }, { col: 33, row: 21, size: 'S' },
-    { col: 20, row: 30, size: 'M' }, { col: 25, row: 31, size: 'S' },
+    { col: 46, row: 15, size: 'L' }, { col: 50, row: 18, size: 'M' }, { col: 55, row: 13, size: 'S' },
+    { col: 8, row: 20, size: 'M' }, { col: 13, row: 20, size: 'L' }, { col: 16, row: 23, size: 'M' },
+    { col: 18, row: 20, size: 'S' }, { col: 25, row: 22, size: 'S' }, { col: 38, row: 20, size: 'M' },
+
+    // --- Setor 3 (Inferior) ---
+    { col: 5, row: 32, size: 'S' }, { col: 7, row: 35, size: 'S' }, { col: 14, row: 35, size: 'M' },
+    { col: 27, row: 32, size: 'M' }, { col: 30, row: 35, size: 'L' }, { col: 33, row: 31, size: 'S' },
+    { col: 45, row: 32, size: 'S' }, { col: 48, row: 36, size: 'L' }, { col: 54, row: 34, size: 'M' },
+    { col: 20, row: 40, size: 'M' }, { col: 38, row: 40, size: 'S' }, { col: 42, row: 39, size: 'M' },
   ];
 
   const sizes = { S: 28, M: 40, L: 56 };
@@ -150,12 +154,14 @@ function generateMap() {
     });
   }
 
-  // Zonas de velocidade
+  // Zonas de velocidade remapeadas
   speedZones = [
-    { x: hx + 16 * T, y: hy + 12 * T, w: 5 * T, h: 4 * T, type: 'boost', label: '⚡ BOOST' },
-    { x: hx + 26 * T, y: hy + 12 * T, w: 5 * T, h: 4 * T, type: 'slow', label: '❄ SLOW' },
-    { x: hx + 2 * T, y: divY2 + 8 * T, w: 3 * T, h: 3 * T, type: 'boost', label: '⚡ BOOST' },
-    { x: hx + 38 * T, y: divY2 + 8 * T, w: 3 * T, h: 3 * T, type: 'boost', label: '⚡ BOOST' },
+    { x: hx + 10 * T, y: hy + 6 * T, w: 5 * T, h: 4 * T, type: 'boost', label: '⚡ BOOST' },
+    { x: hx + 48 * T, y: hy + 6 * T, w: 5 * T, h: 4 * T, type: 'boost', label: '⚡ BOOST' },
+    { x: hx + 28 * T, y: hy + 10 * T, w: 6 * T, h: 3 * T, type: 'slow', label: '❄ SLOW' },
+    { x: hx + 6 * T, y: hy + 34 * T, w: 4 * T, h: 4 * T, type: 'boost', label: '⚡ BOOST' },
+    { x: hx + 52 * T, y: hy + 34 * T, w: 4 * T, h: 4 * T, type: 'boost', label: '⚡ BOOST' },
+    { x: hx + 28 * T, y: hy + 38 * T, w: 6 * T, h: 3 * T, type: 'slow', label: '❄ SLOW' },
   ];
 }
 
@@ -182,8 +188,8 @@ function collidesWithBoxes(x, y, w, h, excludeId) {
 }
 
 function findSpawnPos() {
-  const hx = 3 * TILE + TILE, hy = 2 * TILE + TILE;
-  const hw = 42 * TILE, hh = 30 * TILE;
+  const hx = 3 * TILE + TILE, hy = 3 * TILE + TILE;
+  const hw = 60 * TILE, hh = 42 * TILE;
   for (let tries = 0; tries < 200; tries++) {
     const x = hx + Math.random() * hw;
     const y = hy + Math.random() * hh;
@@ -226,6 +232,8 @@ function serializePlayer(p) {
     shieldTimer: p.shieldTimer,
     supernovaTimer: p.supernovaTimer,
     gravityTimer: p.gravityTimer,
+    invisibilityTimer: p.invisibilityTimer,
+    empTimer: p.empTimer,
   };
 }
 
@@ -260,9 +268,13 @@ function startInGame() {
     hotPlayer.health = 100;
     hotPlayer.machinegunTimer = 0;
     hotPlayer.shieldTimer = 0;
+    hotPlayer.invisibilityTimer = 0;
+    hotPlayer.empTimer = 0;
   }
   broadcast({ type: 'phaseChange', phase: Phase.INGAME, timer: GAME_SECS, hotAlphaId: hotId });
-  // Spawna o primeiro pickup imediatamente ao começar a partida
+  // Spawna o primeiro pickup imediatamente ao começar a partida (dobro do inicial)
+  spawnRandomPickup();
+  spawnRandomPickup();
   spawnRandomPickup();
   spawnRandomPickup();
 }
@@ -301,6 +313,8 @@ function resetGame() {
     p.shieldTimer = 0;
     p.supernovaTimer = 0;
     p.gravityTimer = 0;
+    p.invisibilityTimer = 0;
+    p.empTimer = 0;
   }
   broadcast({ type: 'phaseChange', phase: Phase.LOBBY, timer: 0, map: getMapData() });
 
@@ -324,10 +338,10 @@ function checkWinConditions() {
 
 // ─── Geração de Itens Cyberpunk v6 ───
 function spawnRandomPickup() {
-  if (pickups.length >= 5) return; // Limite de 5 itens no mapa simultaneamente
+  if (pickups.length >= 10) return; // Limite de 10 itens no mapa simultaneamente (o dobro do limite anterior de 5)
 
-  const hx = 3 * TILE, hy = 2 * TILE;
-  const hw = 44 * TILE, hh = 32 * TILE;
+  const hx = 3 * TILE, hy = 3 * TILE;
+  const hw = 62 * TILE, hh = 44 * TILE;
 
   let spawned = false;
   let attempts = 0;
@@ -339,7 +353,7 @@ function spawnRandomPickup() {
     if (!collidesWithWalls(rx - 10, ry - 10, 20, 20) && 
         !collidesWithBoxes(rx - 10, ry - 10, 20, 20, -1)) {
       
-      const types = ['speed', 'machinegun', 'shield', 'supernova', 'gravity'];
+      const types = ['speed', 'machinegun', 'shield', 'supernova', 'gravity', 'invisibility', 'emp'];
       const type = types[Math.floor(Math.random() * types.length)];
 
       const item = {
@@ -540,6 +554,8 @@ wss.on('connection', (ws) => {
         shieldTimer: 0,
         supernovaTimer: 0,
         gravityTimer: 0,
+        invisibilityTimer: 0,
+        empTimer: 0,
       };
 
       players.set(pId, currentPlayer);
@@ -735,6 +751,8 @@ function gameTick() {
     if (p.shieldTimer > 0) p.shieldTimer--;
     if (p.supernovaTimer > 0) p.supernovaTimer--;
     if (p.gravityTimer > 0) p.gravityTimer--;
+    if (p.invisibilityTimer > 0) p.invisibilityTimer--;
+    if (p.empTimer > 0) p.empTimer--;
   }
 
   // 4. Detecção de Coleta de Itens v6
@@ -752,7 +770,7 @@ function gameTick() {
         let collected = false;
 
         if (p.isHot) {
-          // Pegador coleta Speed, Supernova ou Aura Gravitacional
+          // Pegador coleta Speed, Supernova, Aura Gravitacional ou EMP
           if (pickup.type === 'speed') {
             p.speedBoostTimer = 15 * TICK_RATE;
             collected = true;
@@ -762,9 +780,12 @@ function gameTick() {
           } else if (pickup.type === 'gravity') {
             p.gravityTimer = 12 * TICK_RATE;
             collected = true;
+          } else if (pickup.type === 'emp') {
+            p.empTimer = 10 * TICK_RATE;
+            collected = true;
           }
         } else {
-          // Corredor coleta Speed, Metralhadora Burst ou Escudo de Plasma
+          // Corredor coleta Speed, Metralhadora Burst, Escudo de Plasma ou Invisibilidade
           if (pickup.type === 'speed') {
             p.speedBoostTimer = 15 * TICK_RATE;
             collected = true;
@@ -773,6 +794,9 @@ function gameTick() {
             collected = true;
           } else if (pickup.type === 'shield') {
             p.shieldTimer = 20 * TICK_RATE;
+            collected = true;
+          } else if (pickup.type === 'invisibility') {
+            p.invisibilityTimer = 12 * TICK_RATE;
             collected = true;
           }
         }
@@ -843,6 +867,25 @@ function gameTick() {
       }
       if (underGravity) {
         speed *= 0.4;
+      }
+
+      // Pulso Cyber EMP (Corredor perto de Hot com EMP ativo perde arma e tether)
+      let underEmp = false;
+      for (const [, p2] of players) {
+        if (p2.isHot && p2.empTimer > 0) {
+          const edx = (p2.x + p2.w / 2) - (p.x + p.w / 2);
+          const edy = (p2.y + p2.h / 2) - (p.y + p.h / 2);
+          const edist = Math.sqrt(edx * edx + edy * edy);
+          if (edist <= 200) {
+            underEmp = true;
+            break;
+          }
+        }
+      }
+      if (underEmp) {
+        p.reloadTimer = Math.max(p.reloadTimer, 2 * TICK_RATE); // Bloqueia tiro/arma
+        p.ammo = 0; // Zerado!
+        p.holdEnergy = 0; // Zera tether!
       }
     }
 
@@ -937,6 +980,7 @@ function gameTick() {
             runner.health = 100;
             runner.machinegunTimer = 0;
             runner.shieldTimer = 0;
+            runner.invisibilityTimer = 0;
             broadcast({
               type: 'infected',
               playerId: runner.id,
