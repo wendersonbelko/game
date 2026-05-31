@@ -438,6 +438,11 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg-d
   box-shadow: 0 0 12px rgba(255, 0, 255, 0.3);
   background: rgba(255, 0, 255, 0.05);
 }
+.inventory-slot.active.repel {
+  border-color: #00d2ff;
+  box-shadow: 0 0 12px rgba(0, 210, 255, 0.35);
+  background: rgba(0, 210, 255, 0.05);
+}
 .inventory-slot-key {
   position: absolute;
   top: 4px;

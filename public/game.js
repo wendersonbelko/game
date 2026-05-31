@@ -121,6 +121,52 @@ function playBuySfx() {
   osc.stop(audioCtx.currentTime + 0.18);
 }
 
+function playMagnetSfx() {
+  initAudioContext();
+  if (!audioCtx || globalVolume <= 0.001) return;
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume();
+  }
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  
+  osc.type = 'sawtooth';
+  osc.frequency.setValueAtTime(330, audioCtx.currentTime);
+  osc.frequency.linearRampToValueAtTime(110, audioCtx.currentTime + 0.35);
+  
+  gain.gain.setValueAtTime(globalVolume * 0.12, audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.40);
+  
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  
+  osc.start();
+  osc.stop(audioCtx.currentTime + 0.40);
+}
+
+function playRepelSfx() {
+  initAudioContext();
+  if (!audioCtx || globalVolume <= 0.001) return;
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume();
+  }
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(220, audioCtx.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(660, audioCtx.currentTime + 0.25);
+  
+  gain.gain.setValueAtTime(globalVolume * 0.15, audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.30);
+  
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  
+  osc.start();
+  osc.stop(audioCtx.currentTime + 0.30);
+}
+
 const sfx10s = new Audio('10s.mp3');
 sfx10s.volume = globalVolume;
 let alert10sFired = false;
@@ -571,12 +617,21 @@ function handleMessage(msg) {
       if (msg.playerId === myId) {
         addFeedItem(`🛒 Compra efetuada com sucesso!`);
         playBuySfx();
+        if (msg.itemId === 'magnetic') {
+          playMagnetSfx();
+        }
       }
       const buyer = players.get(msg.playerId);
       if (buyer) {
         for (let k = 0; k < 25; k++) {
           spawnParticle(buyer.x + 14, buyer.y + 14, '#00f0ff', 25 + Math.random()*15, 4.5);
         }
+      }
+      break;
+
+    case 'powerActivated':
+      if (msg.playerId === myId) {
+        if (msg.powerType === 'repel') playRepelSfx();
       }
       break;
 
@@ -590,13 +645,19 @@ function handleMessage(msg) {
         invisibility: 'CAMUFLAGEM HOLOGRÁFICA 👤 (Fique Invisível)',
         emp: 'PULSO CYBER EMP ⚡ (Desativa armas/tether dos corredores)',
         overdrive: 'CANHÃO OVERDRIVE 🔫 (Munição Infinita & Sem Recarga!)',
-        tracker: 'RASTREADOR TÉRMICO 🎯 (Revela todos os corredores!)'
+        tracker: 'RASTREADOR TÉRMICO 🎯 (Revela todos os corredores!)',
+        repel: 'PULSO REPULSOR 🛡️ (Empurra Hots ao redor)',
+        magnetic: 'VÓRTEX MAGNÉTICO 🧲 (Puxa tudo ao redor)'
       };
       const label = itemNames[msg.itemType] || 'ITEM ESPECIAL';
       addFeedItem(`🎉 ${msg.playerName} coletou ${label}!`);
       
-      const itemColors = { speed: '#00ff88', machinegun: '#ffcc00', shield: '#00f0ff', supernova: '#ff2244', gravity: '#aa66ff', invisibility: '#ffffff', emp: '#ff00ff', overdrive: '#ff3300', tracker: '#ff5555' };
+      const itemColors = { speed: '#00ff88', machinegun: '#ffcc00', shield: '#00f0ff', supernova: '#ff2244', gravity: '#aa66ff', invisibility: '#ffffff', emp: '#ff00ff', overdrive: '#ff3300', tracker: '#ff5555', repel: '#00d2ff', magnetic: '#aa00ff' };
       const col = itemColors[msg.itemType] || '#ffffff';
+
+      if (msg.playerId === myId) {
+        if (msg.itemType === 'magnetic') playMagnetSfx();
+      }
       
       // Burst de partículas de feedback de coleta no player
       const cp = players.get(msg.playerId);
@@ -762,7 +823,8 @@ function updateWeaponHud() {
         speed: { name: 'SPEED BOOST', desc: 'Super Velocidade' },
         machinegun: { name: 'BURST LASER', desc: 'Rajada de Tiros' },
         shield: { name: 'PLASMA SHIELD', desc: 'Escudo Protetor' },
-        invisibility: { name: 'CHAMELEON', desc: 'Invisibilidade' }
+        invisibility: { name: 'CHAMELEON', desc: 'Invisibilidade' },
+        repel: { name: 'PULSO REPULSOR', desc: 'Repele Hots ao Redor' }
       };
 
       const updateSlot = (el, powerKey) => {
@@ -807,6 +869,7 @@ function updateShopUI() {
       { id: 'speed', name: '⚡ VELOCIDADE', desc: 'Super Velocidade (+40%)', price: 3 },
       { id: 'blink', name: '⚡ BLINK', desc: 'Teleporte Curto (160px)', price: 3 },
       { id: 'shield', name: '🛡️ PLASMA SHIELD', desc: 'Escudo Protetor', price: 4 },
+      { id: 'repel', name: '🛡️ PULSO REPULSOR', desc: 'Repele Hots ao Redor (6s)', price: 4 },
       { id: 'machinegun', name: '🔫 BURST LASER', desc: 'Metralhadora Burst', price: 4 },
       { id: 'phaseshift', name: '🌀 PHASE SHIFT', desc: 'Atravessa Paredes (4s)', price: 5 },
       { id: 'invisibility', name: '👤 CHAMELEON', desc: 'Invisibilidade (12s)', price: 5 },
@@ -816,6 +879,7 @@ function updateShopUI() {
       { id: 'speed', name: '⚡ VELOCIDADE', desc: 'Super Velocidade (+40%)', price: 3 },
       { id: 'tracker', name: '🎯 THERMAL RADAR', desc: 'Mira Neon Lock-On (10s)', price: 3 },
       { id: 'gravity', name: '🕸️ AURA GRAVIDADE', desc: 'Desacelera Corredores', price: 4 },
+      { id: 'magnetic', name: '🧲 VÓRTEX MAGNET', desc: 'Puxa Corredores e Caixas (8s)', price: 4 },
       { id: 'supernova', name: '🔥 SUPERNOVA', desc: 'Raio Contágio Ampliado', price: 4 },
       { id: 'emp', name: '⚡ EMP HACK', desc: 'Desativa Armas/Tethers', price: 5 },
     ];
@@ -1516,6 +1580,66 @@ function drawPlayers() {
       ctx.restore();
     }
 
+    // 3b. Pulso Repulsor do Corredor (bolha protetora azul neon pulsante)
+    if (p.repelTimer > 0) {
+      ctx.save();
+      ctx.strokeStyle = '#00d2ff';
+      ctx.lineWidth = 3;
+      ctx.shadowColor = '#00d2ff';
+      ctx.shadowBlur = 15;
+      
+      // Bolha pulsante
+      ctx.beginPath();
+      ctx.arc(cx, cy, sz/2 + 10 + Math.sin(Date.now() / 80) * 2, 0, Math.PI * 2);
+      ctx.stroke();
+      
+      // Ondas repulsivas expansivas secundárias
+      ctx.strokeStyle = 'rgba(0, 210, 255, 0.3)';
+      ctx.lineWidth = 1;
+      const t = (Date.now() / 400) % 1;
+      ctx.beginPath();
+      ctx.arc(cx, cy, sz/2 + 10 + t * 40, 0, Math.PI * 2);
+      ctx.stroke();
+      
+      ctx.restore();
+    }
+
+    // 3c. Vórtex Magnético do Hot (anéis roxos que colapsam em direção ao Hot)
+    if (p.isHot && p.magnetTimer > 0) {
+      ctx.save();
+      ctx.strokeStyle = '#aa00ff';
+      ctx.lineWidth = 2.5;
+      ctx.shadowColor = '#aa00ff';
+      ctx.shadowBlur = 12;
+      
+      // Aura base
+      ctx.beginPath();
+      ctx.arc(cx, cy, 24, 0, Math.PI * 2);
+      ctx.stroke();
+      
+      // Anéis magnéticos espirais colapsantes
+      const t = (Date.now() / 600) % 1;
+      const r = 240 * (1 - t);
+      if (r > 24) {
+        ctx.strokeStyle = `rgba(170, 0, 255, ${0.4 * t})`;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      
+      const r2 = 240 * (1 - ((t + 0.5) % 1));
+      if (r2 > 24) {
+        ctx.strokeStyle = `rgba(170, 0, 255, ${0.4 * ((t + 0.5) % 1)})`;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r2, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      
+      ctx.restore();
+    }
+
     // Nome
     ctx.fillStyle = p.isStunned ? '#ccaaff' : (p.isHot ? '#ff8866' : (p.color || '#88ddff'));
     ctx.font = 'bold 11px Rajdhani';
@@ -1545,6 +1669,8 @@ function drawPlayers() {
     if (p.empTimer > 0) activeBuffs.push({ label: `⚡ EMP HACK (${Math.ceil(p.empTimer/60)}s)`, color: '#ff00ff' });
     if (p.overdriveTimer > 0) activeBuffs.push({ label: `🔫 OVERDRV (${Math.ceil(p.overdriveTimer/60)}s)`, color: '#ff3300' });
     if (p.trackerTimer > 0) activeBuffs.push({ label: `🎯 RADAR (${Math.ceil(p.trackerTimer/60)}s)`, color: '#ff5555' });
+    if (p.magnetTimer > 0) activeBuffs.push({ label: `🧲 VÓRTEX (${Math.ceil(p.magnetTimer/60)}s)`, color: '#aa00ff' });
+    if (p.repelTimer > 0) activeBuffs.push({ label: `🛡️ REPEL (${Math.ceil(p.repelTimer/60)}s)`, color: '#00d2ff' });
 
     ctx.save();
     ctx.font = 'bold 8px Orbitron';

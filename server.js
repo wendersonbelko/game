@@ -339,6 +339,8 @@ function serializePlayer(p) {
     slotQ: p.slotQ,
     slotE: p.slotE,
     phaseshiftTimer: p.phaseshiftTimer,
+    magnetTimer: p.magnetTimer || 0,
+    repelTimer: p.repelTimer || 0,
 
     // Economia v8
     coins: p.coins || 0,
@@ -400,6 +402,8 @@ function startWarmup() {
     p.slotQ = null;
     p.slotE = null;
     p.phaseshiftTimer = 0;
+    p.magnetTimer = 0;
+    p.repelTimer = 0;
 
     // Reset Economia v8
     p.coins = 0;
@@ -485,6 +489,8 @@ function resetGame() {
     p.slotQ = null;
     p.slotE = null;
     p.phaseshiftTimer = 0;
+    p.magnetTimer = 0;
+    p.repelTimer = 0;
 
     // Reset Economia v8
     p.coins = 0;
@@ -526,7 +532,7 @@ function spawnRandomPickup() {
     if (!collidesWithWalls(rx - 10, ry - 10, 20, 20) && 
         !collidesWithBoxes(rx - 10, ry - 10, 20, 20, -1)) {
       
-      const types = ['speed', 'machinegun', 'shield', 'supernova', 'gravity', 'invisibility', 'emp', 'phaseshift', 'blink'];
+      const types = ['speed', 'machinegun', 'shield', 'supernova', 'gravity', 'invisibility', 'emp', 'phaseshift', 'blink', 'repel', 'magnetic'];
       const type = types[Math.floor(Math.random() * types.length)];
 
       const item = {
@@ -787,6 +793,8 @@ wss.on('connection', (ws) => {
         slotQ: null,
         slotE: null,
         phaseshiftTimer: 0,
+        magnetTimer: 0,
+        repelTimer: 0,
 
         // --- Economia v8 ---
         coins: 0,
@@ -963,6 +971,9 @@ wss.on('connection', (ws) => {
       } else if (powerKey === 'invisibility') {
         currentPlayer.invisibilityTimer = 12 * TICK_RATE;
         broadcast({ type: 'powerActivated', playerId: currentPlayer.id, powerType: 'invisibility' });
+      } else if (powerKey === 'repel') {
+        currentPlayer.repelTimer = 6 * TICK_RATE; // 6 segundos
+        broadcast({ type: 'powerActivated', playerId: currentPlayer.id, powerType: 'repel' });
       }
     }
 
@@ -970,8 +981,8 @@ wss.on('connection', (ws) => {
       if (currentPlayer.isStunned) return;
       
       const itemId = msg.itemId;
-      const runnerPrices = { speed: 3, blink: 3, shield: 4, machinegun: 4, phaseshift: 5, invisibility: 5 };
-      const hotPrices = { speed: 3, tracker: 3, gravity: 4, supernova: 4, emp: 5 };
+      const runnerPrices = { speed: 3, blink: 3, shield: 4, machinegun: 4, phaseshift: 5, invisibility: 5, repel: 4 };
+      const hotPrices = { speed: 3, tracker: 3, gravity: 4, supernova: 4, emp: 5, magnetic: 4 };
       
       const prices = currentPlayer.isHot ? hotPrices : runnerPrices;
       const price = prices[itemId];
@@ -1003,6 +1014,8 @@ wss.on('connection', (ws) => {
           currentPlayer.supernovaTimer = 10 * TICK_RATE;
         } else if (itemId === 'emp') {
           currentPlayer.empTimer = 10 * TICK_RATE;
+        } else if (itemId === 'magnetic') {
+          currentPlayer.magnetTimer = 8 * TICK_RATE;
         }
         broadcast({ type: 'itemBought', playerId: currentPlayer.id, itemId, coins: currentPlayer.coins });
       }
@@ -1116,6 +1129,8 @@ function gameTick() {
     if (p.overdriveTimer > 0) p.overdriveTimer--;
     if (p.trackerTimer > 0) p.trackerTimer--;
     if (p.phaseshiftTimer > 0) p.phaseshiftTimer--;
+    if (p.magnetTimer > 0) p.magnetTimer--;
+    if (p.repelTimer > 0) p.repelTimer--;
 
     // Canhão Overdrive: munição infinita e sem recarga
     if (p.overdriveTimer > 0) {
@@ -1171,10 +1186,13 @@ function gameTick() {
           } else if (pickup.type === 'tracker') {
             p.trackerTimer = 10 * TICK_RATE;
             collected = true;
+          } else if (pickup.type === 'magnetic') {
+            p.magnetTimer = 8 * TICK_RATE;
+            collected = true;
           }
         } else {
           // Corredores: guardam itens no Slot Q ou E se tiverem espaço
-          if (['speed', 'machinegun', 'shield', 'invisibility', 'phaseshift', 'blink'].includes(pickup.type)) {
+          if (['speed', 'machinegun', 'shield', 'invisibility', 'phaseshift', 'blink', 'repel'].includes(pickup.type)) {
             if (!p.slotQ) {
               p.slotQ = pickup.type;
               collected = true;
@@ -1310,14 +1328,47 @@ function gameTick() {
       }
     }
 
+    // --- Novos Efeitos de Força v9 (Magnetismo e Repulsão) ---
+    let fx = 0, fy = 0;
+
+    if (!p.isHot) {
+      // 1. Corredor sob atração magnética de qualquer Hot com Vórtex Ativo
+      for (const [, p2] of players) {
+        if (p2.isHot && p2.magnetTimer > 0) {
+          const mdx = (p2.x + PLAYER_SIZE / 2) - (p.x + PLAYER_SIZE / 2);
+          const mdy = (p2.y + PLAYER_SIZE / 2) - (p.y + PLAYER_SIZE / 2);
+          const mdist = Math.sqrt(mdx * mdx + mdy * mdy);
+          if (mdist > 0 && mdist <= 240) {
+            const pullStrength = 3.6 * (1 - mdist / 240); // Força diminui com a distância
+            fx += (mdx / mdist) * pullStrength;
+            fy += (mdy / mdist) * pullStrength;
+          }
+        }
+      }
+    } else {
+      // 2. Hot sob repulsão de qualquer Corredor com Pulso Repulsor Ativo
+      for (const [, p2] of players) {
+        if (!p2.isHot && p2.repelTimer > 0) {
+          const rdx = (p.x + PLAYER_SIZE / 2) - (p2.x + PLAYER_SIZE / 2);
+          const rdy = (p.y + PLAYER_SIZE / 2) - (p2.y + PLAYER_SIZE / 2);
+          const rdist = Math.sqrt(rdx * rdx + rdy * rdy);
+          if (rdist > 0 && rdist <= 180) {
+            const pushStrength = 5.2 * (1 - rdist / 180); // Empurrão diminui com a distância
+            fx += (rdx / rdist) * pushStrength;
+            fy += (rdy / rdist) * pushStrength;
+          }
+        }
+      }
+    }
+
     // Mover X
     const hasPhaseShift = p.phaseshiftTimer > 0;
-    let nx = p.x + dx * speed;
+    let nx = p.x + dx * speed + fx;
     if (hasPhaseShift || (!collidesWithWalls(nx, p.y, p.w, p.h) && !collidesWithBoxes(nx, p.y, p.w, p.h, -1))) {
       p.x = nx;
     }
     // Mover Y
-    let ny = p.y + dy * speed;
+    let ny = p.y + dy * speed + fy;
     if (hasPhaseShift || (!collidesWithWalls(p.x, ny, p.w, p.h) && !collidesWithBoxes(p.x, ny, p.w, p.h, -1))) {
       p.y = ny;
     }
@@ -1353,6 +1404,36 @@ function gameTick() {
     if (!collidesWithWalls(box.x + 1, nyB + 1, box.w - 2, box.h - 2) && 
         !collidesWithBoxes(box.x + 1, nyB + 1, box.w - 2, box.h - 2, box.id)) {
       box.y = nyB;
+    }
+  }
+
+  // 6b. ── Vórtex Magnético sobre Caixas v9 ──
+  for (const box of pushables) {
+    let bfx = 0, bfy = 0;
+    for (const [, p] of players) {
+      if (p.isHot && p.magnetTimer > 0) {
+        const bdx = (p.x + PLAYER_SIZE / 2) - (box.x + box.w / 2);
+        const bdy = (p.y + PLAYER_SIZE / 2) - (box.y + box.h / 2);
+        const bdist = Math.sqrt(bdx * bdx + bdy * bdy);
+        if (bdist > 0 && bdist <= 240) {
+          const pullStrength = 3.2 * (1 - bdist / 240); // Força diminui com a distância
+          bfx += (bdx / bdist) * pullStrength;
+          bfy += (bdy / bdist) * pullStrength;
+        }
+      }
+    }
+
+    if (bfx !== 0 || bfy !== 0) {
+      const nxBoxX = box.x + bfx;
+      if (!collidesWithWalls(nxBoxX + 1, box.y + 1, box.w - 2, box.h - 2) && 
+          !collidesWithBoxes(nxBoxX + 1, box.y + 1, box.w - 2, box.h - 2, box.id)) {
+        box.x = nxBoxX;
+      }
+      const nxBoxY = box.y + bfy;
+      if (!collidesWithWalls(box.x + 1, nxBoxY + 1, box.w - 2, box.h - 2) && 
+          !collidesWithBoxes(box.x + 1, nxBoxY + 1, box.w - 2, box.h - 2, box.id)) {
+        box.y = nxBoxY;
+      }
     }
   }
 
