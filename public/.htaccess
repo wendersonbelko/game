@@ -1,0 +1,15 @@
+Options -Indexes
+
+# ── Proxy HTTP e WebSocket para o servidor Node.js ──
+RewriteEngine On
+
+# WebSocket (wss:// / ws://)
+RewriteCond %{HTTP:Upgrade} =websocket [NC]
+RewriteRule ^(.*)$ ws://127.0.0.1:3000/$1 [P,L]
+
+# HTTP normal
+RewriteCond %{HTTP:Upgrade} !=websocket [NC]
+RewriteRule ^(.*)$ http://127.0.0.1:3000/$1 [P,L]
+
+# Cabecalhos de proxy reverso
+RequestHeader set X-Forwarded-Proto "https"
