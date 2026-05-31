@@ -432,16 +432,16 @@ function performRaycast(currentPlayer, tx, ty, angleOffset = 0, isMachinegun = f
       hitType = 'box';
       hitTargetId = boxHit.id;
 
-      // Metralhadora causa empurrão maior na caixa!
+      // Metralhadora causa empurrão maior na caixa! (Com inset de 1px para evitar travamentos)
       const pushDist = isMachinegun ? 40 : 35;
       const targetBoxX = boxHit.x + ux * pushDist;
       const targetBoxY = boxHit.y + uy * pushDist;
-      if (!collidesWithWalls(targetBoxX, boxHit.y, boxHit.w, boxHit.h) &&
-          !collidesWithBoxes(targetBoxX, boxHit.y, boxHit.w, boxHit.h, boxHit.id)) {
+      if (!collidesWithWalls(targetBoxX + 1, boxHit.y + 1, boxHit.w - 2, boxHit.h - 2) &&
+          !collidesWithBoxes(targetBoxX + 1, boxHit.y + 1, boxHit.w - 2, boxHit.h - 2, boxHit.id)) {
         boxHit.x = targetBoxX;
       }
-      if (!collidesWithWalls(boxHit.x, targetBoxY, boxHit.w, boxHit.h) &&
-          !collidesWithBoxes(boxHit.x, targetBoxY, boxHit.w, boxHit.h, boxHit.id)) {
+      if (!collidesWithWalls(boxHit.x + 1, targetBoxY + 1, boxHit.w - 2, boxHit.h - 2) &&
+          !collidesWithBoxes(boxHit.x + 1, targetBoxY + 1, boxHit.w - 2, boxHit.h - 2, boxHit.id)) {
         boxHit.y = targetBoxY;
       }
       break;
@@ -652,6 +652,15 @@ wss.on('connection', (ws) => {
         currentPlayer.grabbedBox = null;
         currentPlayer.mouseWorld = null;
       }
+    }
+
+    if (msg.type === 'reload') {
+      if (currentPlayer.isHot) return;
+      if (currentPlayer.isStunned) return;
+      if (currentPlayer.reloadTimer > 0) return;
+      if (currentPlayer.ammo >= 3) return; // Só recarrega se gastou bala
+      currentPlayer.reloadTimer = 2.5 * TICK_RATE; // 2.5 segundos (metade)
+      currentPlayer.ammo = 0; // Desativa tiro durante a recarga
     }
   });
 
@@ -923,11 +932,13 @@ function gameTick() {
     const my = (ddy / dist) * spd;
 
     const nxB = box.x + mx;
-    if (!collidesWithWalls(nxB, box.y, box.w, box.h) && !collidesWithBoxes(nxB, box.y, box.w, box.h, box.id)) {
+    if (!collidesWithWalls(nxB + 1, box.y + 1, box.w - 2, box.h - 2) && 
+        !collidesWithBoxes(nxB + 1, box.y + 1, box.w - 2, box.h - 2, box.id)) {
       box.x = nxB;
     }
     const nyB = box.y + my;
-    if (!collidesWithWalls(box.x, nyB, box.w, box.h) && !collidesWithBoxes(box.x, nyB, box.w, box.h, box.id)) {
+    if (!collidesWithWalls(box.x + 1, nyB + 1, box.w - 2, box.h - 2) && 
+        !collidesWithBoxes(box.x + 1, nyB + 1, box.w - 2, box.h - 2, box.id)) {
       box.y = nyB;
     }
   }

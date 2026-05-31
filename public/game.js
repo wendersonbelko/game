@@ -114,6 +114,10 @@ volumeSlider.addEventListener('input', () => {
   globalVolume = val / 100;
   bgMusic.volume = globalVolume;
   sfx10s.volume = globalVolume;
+  // Atualiza em tempo real o volume de todos os tiros instanciados no pool
+  for (const a of shotPool) {
+    a.volume = globalVolume;
+  }
   updateVolumeUI(val);
 });
 
@@ -201,6 +205,15 @@ window.addEventListener('keydown', e => {
 
   // Ignora movimento se estiver digitando em inputs
   if (document.activeElement === nameInput || document.activeElement === chatInput) return;
+
+  // Recarga manual rápida com a tecla R
+  if (e.key === 'r' || e.key === 'R') {
+    if (ws && ws.readyState === 1 && joined) {
+      ws.send(JSON.stringify({ type: 'reload' }));
+    }
+    e.preventDefault();
+    return;
+  }
 
   const k = keyMap[e.key];
   if (k) { keys[k] = true; e.preventDefault(); }
@@ -590,6 +603,8 @@ function updateWeaponHud() {
 
     // Reload indicator
     if (me.reloadTimer > 0) {
+      const secs = (me.reloadTimer / 60).toFixed(1);
+      reloadAlert.textContent = `RECARREGANDO (${secs}s)...`;
       reloadAlert.classList.remove('hidden');
     } else {
       reloadAlert.classList.add('hidden');
@@ -1203,6 +1218,41 @@ function drawPlayers() {
       ctx.arc(cx, cy, sz/2 + 6, 0, Math.PI * 2);
       ctx.stroke();
       ctx.setLineDash([]);
+
+      // Desenha o círculo holográfico de alcance do Tether/Arrasto (raio 70px)
+      ctx.save();
+      ctx.strokeStyle = 'rgba(0, 240, 255, 0.15)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 6]);
+      ctx.beginPath();
+      ctx.arc(cx, cy, 70, 0, Math.PI * 2);
+      ctx.stroke();
+
+      const holdingBox = grabbedBoxId !== null || (p.grabbedBox !== undefined && p.grabbedBox !== null);
+      let nearBox = false;
+      if (!holdingBox) {
+        for (const b of pushables) {
+          const bx = b.x + b.w / 2;
+          const by = b.y + b.h / 2;
+          const dist = Math.sqrt((cx - bx) * (cx - bx) + (cy - by) * (cy - by));
+          // Se estiver a alcance de arrasto (70px + metade da largura da caixa + margem)
+          if (dist <= 70 + b.w / 2 + 10) {
+            nearBox = true;
+            break;
+          }
+        }
+      }
+      if (holdingBox || nearBox) {
+        ctx.strokeStyle = 'rgba(0, 255, 136, 0.45)';
+        ctx.lineWidth = 1.8;
+        ctx.setLineDash([6, 4]);
+        ctx.shadowColor = '#00ff88';
+        ctx.shadowBlur = 8;
+        ctx.beginPath();
+        ctx.arc(cx, cy, 70, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
     }
   }
 }
