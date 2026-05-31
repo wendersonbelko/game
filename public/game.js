@@ -56,8 +56,10 @@ const keys = { up: false, down: false, left: false, right: false };
 let lastInputJson = '';
 
 // ── Áudio ──
+let globalVolume = 0.20; // Volume mestre global [0..1]
+
 const sfx10s = new Audio('10s.mp3');
-sfx10s.volume = 0.25;
+sfx10s.volume = globalVolume;
 let alert10sFired = false;
 
 // Pool de sons de tiro (suporta rajadas rápidas sem travar)
@@ -73,13 +75,14 @@ function playShotSound(volume) {
   const snd = shotPool[shotPoolIndex % SHOT_POOL_SIZE];
   shotPoolIndex++;
   snd.currentTime = 0;
-  snd.volume = Math.max(0, Math.min(1, volume));
+  // Multiplica o volume calculado pela distância pelo volume global
+  snd.volume = Math.max(0, Math.min(1, volume * globalVolume));
   snd.play().catch(() => {});
 }
 
 const bgMusic = new Audio('background.mp3');
 bgMusic.loop = true;
-bgMusic.volume = 0.20;
+bgMusic.volume = globalVolume;
 let bgMusicStarted = false;
 
 function startBgMusic() {
@@ -108,7 +111,9 @@ function updateVolumeUI(val) {
 
 volumeSlider.addEventListener('input', () => {
   const val = Number(volumeSlider.value);
-  bgMusic.volume = val / 100;
+  globalVolume = val / 100;
+  bgMusic.volume = globalVolume;
+  sfx10s.volume = globalVolume;
   updateVolumeUI(val);
 });
 
