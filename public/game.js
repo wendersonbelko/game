@@ -60,9 +60,26 @@ const sfx10s = new Audio('10s.mp3');
 sfx10s.volume = 0.25;
 let alert10sFired = false;
 
+// Pool de sons de tiro (suporta rajadas rápidas sem travar)
+const SHOT_POOL_SIZE = 6;
+const shotPool = Array.from({ length: SHOT_POOL_SIZE }, () => {
+  const a = new Audio('shot.mp3');
+  a.volume = 0;
+  return a;
+});
+let shotPoolIndex = 0;
+
+function playShotSound(volume) {
+  const snd = shotPool[shotPoolIndex % SHOT_POOL_SIZE];
+  shotPoolIndex++;
+  snd.currentTime = 0;
+  snd.volume = Math.max(0, Math.min(1, volume));
+  snd.play().catch(() => {});
+}
+
 const bgMusic = new Audio('background.mp3');
 bgMusic.loop = true;
-bgMusic.volume = 0.25;
+bgMusic.volume = 0.20;
 let bgMusicStarted = false;
 
 function startBgMusic() {
@@ -74,6 +91,29 @@ function startBgMusic() {
 // Inicia a música no primeiro clique/tecla (política de autoplay dos navegadores)
 document.addEventListener('click', startBgMusic, { once: true });
 document.addEventListener('keydown', startBgMusic, { once: true });
+
+// ── Controle de Volume ──
+const volumeSlider = document.getElementById('volumeSlider');
+const volumeLabel  = document.getElementById('volumeLabel');
+const volumeIcon   = document.getElementById('volumeIcon');
+
+function updateVolumeUI(val) {
+  const pct = Math.round(val);
+  volumeLabel.textContent = pct + '%';
+  volumeIcon.textContent = pct === 0 ? '🔇' : pct < 40 ? '🔉' : '🔊';
+  // Preenche a trilha do slider com gradiente neon proporcional
+  volumeSlider.style.background =
+    `linear-gradient(90deg, #00f0ff ${pct}%, rgba(0,240,255,0.12) ${pct}%)`;
+}
+
+volumeSlider.addEventListener('input', () => {
+  const val = Number(volumeSlider.value);
+  bgMusic.volume = val / 100;
+  updateVolumeUI(val);
+});
+
+// Inicializa a UI com o valor padrão
+updateVolumeUI(20);
 
 // Cores do personagem
 const defaultColors = ['#00f0ff','#00ff88','#aa66ff','#ff66cc','#ffcc00','#ff8844','#66ffcc','#88aaff'];
@@ -370,6 +410,22 @@ function handleMessage(msg) {
       });
       // Partículas no ponto de impacto
       spawnImpactSpark(msg.ex, msg.ey, msg.color || '#00f0ff');
+
+      // Som de tiro com volume proporcional à distância do atirador
+      {
+        const me = players.get(myId);
+        if (me) {
+          const dx = msg.sx - (me.x + 14);
+          const dy = msg.sy - (me.y + 14);
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const MAX_HEAR_DIST = 600; // pixels — além disso não ouve nada
+          const vol = Math.max(0, 1 - dist / MAX_HEAR_DIST) * 0.7;
+          if (vol > 0.01) playShotSound(vol);
+        } else {
+          // Próprio atirador antes de receber posição — toca no volume máximo
+          playShotSound(0.7);
+        }
+      }
       break;
 
     case 'chat':
