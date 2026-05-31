@@ -216,6 +216,22 @@ window.addEventListener('keydown', e => {
     return;
   }
 
+  // Ativação de poderes nos slots Q e E
+  if (e.key === 'q' || e.key === 'Q') {
+    if (ws && ws.readyState === 1 && joined) {
+      ws.send(JSON.stringify({ type: 'activatePower', slot: 'Q' }));
+    }
+    e.preventDefault();
+    return;
+  }
+  if (e.key === 'e' || e.key === 'E') {
+    if (ws && ws.readyState === 1 && joined) {
+      ws.send(JSON.stringify({ type: 'activatePower', slot: 'E' }));
+    }
+    e.preventDefault();
+    return;
+  }
+
   // Intercepta Shift para Correr
   if (e.key === 'Shift') {
     keys.shift = true;
@@ -632,6 +648,44 @@ function updateWeaponHud() {
       reloadAlert.classList.add('hidden');
     }
   }
+
+  // 3. Atualiza os Slots de Inventário de Poderes (Q & E)
+  const slotQEl = document.getElementById('slotQ');
+  const slotEEl = document.getElementById('slotE');
+  
+  if (slotQEl && slotEEl) {
+    if (me.isHot) {
+      // Oculta o container do inventário se for Pegador
+      slotQEl.parentElement.parentElement.classList.add('hidden');
+    } else {
+      slotQEl.parentElement.parentElement.classList.remove('hidden');
+      
+      const powerLabels = {
+        phaseshift: { name: 'PHASE SHIFT', desc: 'Atravessar Paredes' },
+        blink: { name: 'SHORT BLINK', desc: 'Teleporte Curto' },
+        speed: { name: 'SPEED BOOST', desc: 'Super Velocidade' },
+        machinegun: { name: 'BURST LASER', desc: 'Rajada de Tiros' },
+        shield: { name: 'PLASMA SHIELD', desc: 'Escudo Protetor' },
+        invisibility: { name: 'CHAMELEON', desc: 'Invisibilidade' }
+      };
+
+      const updateSlot = (el, powerKey) => {
+        el.className = 'inventory-slot';
+        if (powerKey) {
+          el.classList.add('active', powerKey);
+          const cfg = powerLabels[powerKey] || { name: powerKey.toUpperCase(), desc: 'POWERUP' };
+          el.querySelector('.inventory-slot-label').textContent = cfg.name;
+          el.querySelector('.inventory-slot-desc').textContent = cfg.desc;
+        } else {
+          el.querySelector('.inventory-slot-label').textContent = '— VAZIO —';
+          el.querySelector('.inventory-slot-desc').textContent = 'Sem item';
+        }
+      };
+      
+      updateSlot(slotQEl, me.slotQ);
+      updateSlot(slotEEl, me.slotE);
+    }
+  }
 }
 
 // ── Lista de Jogadores Dinâmica (v5) ──
@@ -996,7 +1050,9 @@ function drawPickups() {
       invisibility: { label: '👤 STEALTH', color: '#ffffff' },
       emp: { label: '⚡ EMP', color: '#ff00ff' },
       overdrive: { label: '🔫 OVRDRV', color: '#ff3300' },
-      tracker: { label: '🎯 RADAR', color: '#ff5555' }
+      tracker: { label: '🎯 RADAR', color: '#ff5555' },
+      phaseshift: { label: '🌀 PHASE', color: '#00ff88' },
+      blink: { label: '⚡ BLINK', color: '#ff00ff' }
     };
     const cfg = types[pk.type] || types.speed;
     
@@ -1094,6 +1150,10 @@ function drawPlayers() {
     // Rastro verde de Super Velocidade
     if (p.speedBoostTimer > 0 && Math.random() > 0.5) {
       spawnParticle(p.x + 14 + (Math.random()-0.5)*12, p.y + 14, '#00ff88', 12, 0.5, 1.5);
+    }
+    // Rastro ciano e verde de Phase Shift (Atravessar Parede)
+    if (p.phaseshiftTimer > 0 && Math.random() > 0.4) {
+      spawnParticle(p.x + 14 + (Math.random()-0.5)*12, p.y + 14, '#00ff88', 12, 0.5, 2);
     }
     // Rastro flamejante de Supernova para o Hot
     if (p.isHot && p.supernovaTimer > 0) {
@@ -1210,8 +1270,9 @@ function drawPlayers() {
     }
     ctx.fill();
 
+    const hasPhaseShift = p.phaseshiftTimer > 0;
     ctx.lineWidth = isMe ? 2.5 : 1.5;
-    ctx.strokeStyle = isMe ? '#ffffff' : (p.isStunned ? '#aa66ff' : (p.isHot ? '#ff6644' : (p.color || '#44ccff')));
+    ctx.strokeStyle = hasPhaseShift ? '#00ff88' : (isMe ? '#ffffff' : (p.isStunned ? '#aa66ff' : (p.isHot ? '#ff6644' : (p.color || '#44ccff'))));
     ctx.stroke();
     ctx.restore();
 
@@ -1249,6 +1310,7 @@ function drawPlayers() {
 
     const activeBuffs = [];
     if (p.speedBoostTimer > 0) activeBuffs.push({ label: `⚡ SPEED (${Math.ceil(p.speedBoostTimer/60)}s)`, color: '#00ff88' });
+    if (p.phaseshiftTimer > 0) activeBuffs.push({ label: `🌀 PHASE (${Math.ceil(p.phaseshiftTimer/60)}s)`, color: '#00ff88' });
     if (p.machinegunTimer > 0) activeBuffs.push({ label: `🔫 BURST (${Math.ceil(p.machinegunTimer/60)}s)`, color: '#ffcc00' });
     if (p.shieldTimer > 0) activeBuffs.push({ label: `🛡️ SHIELD (${Math.ceil(p.shieldTimer/60)}s)`, color: '#00f0ff' });
     if (p.supernovaTimer > 0) activeBuffs.push({ label: `🔥 SUPERNOVA (${Math.ceil(p.supernovaTimer/60)}s)`, color: '#ff2244' });

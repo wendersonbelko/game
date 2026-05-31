@@ -328,6 +328,11 @@ function serializePlayer(p) {
     isSprinting: p.isSprinting,
     overdriveTimer: p.overdriveTimer,
     trackerTimer: p.trackerTimer,
+
+    // Slots e Poderes v7
+    slotQ: p.slotQ,
+    slotE: p.slotE,
+    phaseshiftTimer: p.phaseshiftTimer,
   };
 }
 
@@ -379,6 +384,11 @@ function startWarmup() {
     p.isSprinting = false;
     p.overdriveTimer = 0;
     p.trackerTimer = 0;
+
+    // Reset Slots e Poderes v7
+    p.slotQ = null;
+    p.slotE = null;
+    p.phaseshiftTimer = 0;
   }
 
   broadcast({ type: 'phaseChange', phase: Phase.WARMUP, timer: WARMUP_SECS, map: getMapData() });
@@ -454,6 +464,11 @@ function resetGame() {
     p.isSprinting = false;
     p.overdriveTimer = 0;
     p.trackerTimer = 0;
+
+    // Reset Slots e Poderes v7
+    p.slotQ = null;
+    p.slotE = null;
+    p.phaseshiftTimer = 0;
   }
   broadcast({ type: 'phaseChange', phase: Phase.LOBBY, timer: 0, map: getMapData() });
 
@@ -492,7 +507,7 @@ function spawnRandomPickup() {
     if (!collidesWithWalls(rx - 10, ry - 10, 20, 20) && 
         !collidesWithBoxes(rx - 10, ry - 10, 20, 20, -1)) {
       
-      const types = ['speed', 'machinegun', 'shield', 'supernova', 'gravity', 'invisibility', 'emp'];
+      const types = ['speed', 'machinegun', 'shield', 'supernova', 'gravity', 'invisibility', 'emp', 'phaseshift', 'blink'];
       const type = types[Math.floor(Math.random() * types.length)];
 
       const item = {
@@ -699,6 +714,11 @@ wss.on('connection', (ws) => {
         isSprinting: false,
         overdriveTimer: 0,
         trackerTimer: 0,
+
+        // --- Slots e Poderes v7 ---
+        slotQ: null,
+        slotE: null,
+        phaseshiftTimer: 0,
       };
 
       players.set(pId, currentPlayer);
@@ -806,6 +826,73 @@ wss.on('connection', (ws) => {
       currentPlayer.reloadTimer = 2.5 * TICK_RATE; // 2.5 segundos (metade)
       currentPlayer.ammo = 0; // Desativa tiro durante a recarga
     }
+
+    if (msg.type === 'activatePower') {
+      if (currentPlayer.isHot) return;
+      if (currentPlayer.isStunned) return;
+
+      const slot = msg.slot; // 'Q' ou 'E'
+      const powerKey = slot === 'Q' ? currentPlayer.slotQ : currentPlayer.slotE;
+      if (!powerKey) return;
+
+      // Consome o slot
+      if (slot === 'Q') currentPlayer.slotQ = null;
+      else currentPlayer.slotE = null;
+
+      // Ativa o poder correspondente!
+      if (powerKey === 'phaseshift') {
+        currentPlayer.phaseshiftTimer = 4 * TICK_RATE; // 4 segundos
+        broadcast({ type: 'powerActivated', playerId: currentPlayer.id, powerType: 'phaseshift' });
+      } else if (powerKey === 'blink') {
+        // Dispara o Blink!
+        let bdx = 0, bdy = 0;
+        if (currentPlayer.input.up) bdy -= 1;
+        if (currentPlayer.input.down) bdy += 1;
+        if (currentPlayer.input.left) bdx -= 1;
+        if (currentPlayer.input.right) bdx += 1;
+        
+        // Direção padrão se parado
+        if (bdx === 0 && bdy === 0) {
+          bdx = 1; // move para a direita por padrão se parado
+        }
+        
+        let len = Math.sqrt(bdx * bdx + bdy * bdy);
+        const dist = 160; // 160px blink
+        const ux = bdx / len;
+        const uy = bdy / len;
+        
+        let landed = false;
+        // Tenta teleportar de 160px a 0px recuando de 8 em 8px para achar local livre
+        for (let d = dist; d >= 0; d -= 8) {
+          const testX = currentPlayer.x + ux * d;
+          const testY = currentPlayer.y + uy * d;
+          const tx = Math.max(TILE, Math.min(MAP_W - TILE - currentPlayer.w, testX));
+          const ty = Math.max(TILE, Math.min(MAP_H - TILE - currentPlayer.h, testY));
+          if (!collidesWithWalls(tx, ty, currentPlayer.w, currentPlayer.h) &&
+              !collidesWithBoxes(tx, ty, currentPlayer.w, currentPlayer.h, -1)) {
+            currentPlayer.x = tx;
+            currentPlayer.y = ty;
+            landed = true;
+            break;
+          }
+        }
+        if (landed) {
+          broadcast({ type: 'powerActivated', playerId: currentPlayer.id, powerType: 'blink', x: currentPlayer.x, y: currentPlayer.y });
+        }
+      } else if (powerKey === 'speed') {
+        currentPlayer.speedBoostTimer = 15 * TICK_RATE;
+        broadcast({ type: 'powerActivated', playerId: currentPlayer.id, powerType: 'speed' });
+      } else if (powerKey === 'machinegun') {
+        currentPlayer.machinegunTimer = 15 * TICK_RATE;
+        broadcast({ type: 'powerActivated', playerId: currentPlayer.id, powerType: 'machinegun' });
+      } else if (powerKey === 'shield') {
+        currentPlayer.shieldTimer = 20 * TICK_RATE;
+        broadcast({ type: 'powerActivated', playerId: currentPlayer.id, powerType: 'shield' });
+      } else if (powerKey === 'invisibility') {
+        currentPlayer.invisibilityTimer = 12 * TICK_RATE;
+        broadcast({ type: 'powerActivated', playerId: currentPlayer.id, powerType: 'invisibility' });
+      }
+    }
   });
 
   ws.on('close', () => {
@@ -908,6 +995,7 @@ function gameTick() {
     if (p.empTimer > 0) p.empTimer--;
     if (p.overdriveTimer > 0) p.overdriveTimer--;
     if (p.trackerTimer > 0) p.trackerTimer--;
+    if (p.phaseshiftTimer > 0) p.phaseshiftTimer--;
 
     // Canhão Overdrive: munição infinita e sem recarga
     if (p.overdriveTimer > 0) {
@@ -965,22 +1053,15 @@ function gameTick() {
             collected = true;
           }
         } else {
-          // Corredor coleta Speed, Metralhadora Burst, Escudo de Plasma ou Invisibilidade
-          if (pickup.type === 'speed') {
-            p.speedBoostTimer = 15 * TICK_RATE;
-            collected = true;
-          } else if (pickup.type === 'machinegun') {
-            p.machinegunTimer = 15 * TICK_RATE;
-            collected = true;
-          } else if (pickup.type === 'shield') {
-            p.shieldTimer = 20 * TICK_RATE;
-            collected = true;
-          } else if (pickup.type === 'invisibility') {
-            p.invisibilityTimer = 12 * TICK_RATE;
-            collected = true;
-          } else if (pickup.type === 'overdrive') {
-            p.overdriveTimer = 10 * TICK_RATE;
-            collected = true;
+          // Corredores: guardam itens no Slot Q ou E se tiverem espaço
+          if (['speed', 'machinegun', 'shield', 'invisibility', 'phaseshift', 'blink'].includes(pickup.type)) {
+            if (!p.slotQ) {
+              p.slotQ = pickup.type;
+              collected = true;
+            } else if (!p.slotE) {
+              p.slotE = pickup.type;
+              collected = true;
+            }
           }
         }
 
@@ -1081,13 +1162,14 @@ function gameTick() {
     }
 
     // Mover X
+    const hasPhaseShift = p.phaseshiftTimer > 0;
     let nx = p.x + dx * speed;
-    if (!collidesWithWalls(nx, p.y, p.w, p.h) && !collidesWithBoxes(nx, p.y, p.w, p.h, -1)) {
+    if (hasPhaseShift || (!collidesWithWalls(nx, p.y, p.w, p.h) && !collidesWithBoxes(nx, p.y, p.w, p.h, -1))) {
       p.x = nx;
     }
     // Mover Y
     let ny = p.y + dy * speed;
-    if (!collidesWithWalls(p.x, ny, p.w, p.h) && !collidesWithBoxes(p.x, ny, p.w, p.h, -1)) {
+    if (hasPhaseShift || (!collidesWithWalls(p.x, ny, p.w, p.h) && !collidesWithBoxes(p.x, ny, p.w, p.h, -1))) {
       p.y = ny;
     }
     
