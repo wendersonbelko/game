@@ -618,7 +618,13 @@ function handleMessage(msg) {
       alert10sFired = false;
       endScreen.classList.add('hidden');
       hotSelectScreen.classList.add('hidden');
-      if (phase === 'ingame' && msg.hotAlphaId) showHotSelect(msg.hotAlphaId);
+      if (phase === 'ingame') {
+        if (msg.hotAlphaIds && msg.hotAlphaIds.length > 0) {
+          showHotSelect(msg.hotAlphaIds);
+        } else if (msg.hotAlphaId) {
+          showHotSelect([msg.hotAlphaId]);
+        }
+      }
       updateHUD();
       break;
 
@@ -935,6 +941,24 @@ function updateWeaponHud() {
     }
   }
 
+  // 3.5. Atualiza os atalhos com base no papel (Corredor vs Pegador)
+  const shortcutsEl = document.querySelector('.hud-shortcuts');
+  if (shortcutsEl) {
+    if (me.isHot) {
+      shortcutsEl.innerHTML = `
+        <span class="shortcut-badge">⚡ [SHIFT] CORRER</span>
+        <span class="shortcut-badge">🔥 TOQUE PARA CONTAMINAR</span>
+      `;
+    } else {
+      shortcutsEl.innerHTML = `
+        <span class="shortcut-badge">⚡ [SHIFT] CORRER</span>
+        <span class="shortcut-badge">🔫 [R] RECARGA (2.5s)</span>
+        <span class="shortcut-badge">🌀 [Q] PODER 1</span>
+        <span class="shortcut-badge">⚡ [E] PODER 2</span>
+      `;
+    }
+  }
+
   // 4. Atualiza a Cyber-Loja lateral
   updateShopUI();
 }
@@ -1123,9 +1147,19 @@ function addFeedItem(text) {
   if (hudFeed.children.length > 5) hudFeed.firstChild.remove();
 }
 
-function showHotSelect(hotId) {
-  const p = players.get(hotId);
-  hotSelectName.textContent = p ? p.name : '???';
+function showHotSelect(hotIds) {
+  if (!Array.isArray(hotIds)) hotIds = [hotIds];
+  const names = hotIds.map(id => {
+    const p = players.get(id);
+    return p ? p.name : '???';
+  });
+  
+  const titleEl = document.querySelector('.hot-select-content h2');
+  if (titleEl) {
+    titleEl.textContent = names.length > 1 ? 'HOTS ALFAS SELECIONADOS' : 'HOT ALFA SELECIONADO';
+  }
+  
+  hotSelectName.textContent = names.join(' & ');
   hotSelectScreen.classList.remove('hidden');
   setTimeout(() => hotSelectScreen.classList.add('hidden'), 3500);
 }

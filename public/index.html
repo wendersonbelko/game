@@ -88,25 +88,25 @@
 
   <!-- ARMAS & ENERGIA HUD (Novo na v5) -->
   <div id="weaponHud" class="weapon-hud hidden">
-    <div class="stat-row">
+    <div class="stat-row hud-tether">
       <span class="stat-label">⚡ FORÇA DO TETHER (ARRASTO)</span>
       <div class="bar-container">
         <div id="energyBar" class="bar-fill energy-fill"></div>
       </div>
     </div>
-    <div class="stat-row">
+    <div class="stat-row hud-stamina">
       <span class="stat-label">🏃 ESTAMINA (SHIFT PARA CORRER)</span>
       <div class="bar-container">
         <div id="staminaBar" class="bar-fill stamina-fill"></div>
       </div>
     </div>
-    <div class="stat-row">
+    <div class="stat-row hud-weapon">
       <span class="stat-label">🔫 ARMA NEON</span>
       <div id="ammoContainer" class="ammo-container"></div>
+      <div id="reloadAlert" class="reload-alert hidden">RECARREGANDO (5s)...</div>
     </div>
-    <div id="reloadAlert" class="reload-alert hidden">RECARREGANDO (5s)...</div>
 
-    <div class="stat-row">
+    <div class="stat-row hud-inventory">
       <span class="stat-label">🎒 CYBER-INVENTÁRIO</span>
       <div class="inventory-slots">
         <div id="slotQ" class="inventory-slot">

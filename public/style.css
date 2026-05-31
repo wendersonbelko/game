@@ -322,21 +322,20 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg-d
   bottom: 16px;
   left: 50%;
   transform: translateX(-50%);
-  width: auto;
-  min-width: 580px;
-  max-width: 90%;
+  width: 680px;
+  max-width: 95%;
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
-  border-radius: 40px; /* Futuristic rounded pill */
-  padding: 10px 24px;
+  border-radius: 16px; /* Sleek futuristic rounded card */
+  padding: 10px 20px;
   z-index: 52;
   backdrop-filter: blur(16px);
   box-shadow: 0 8px 32px rgba(0,0,0,0.6), 0 0 15px rgba(0,240,255,0.05);
   display: flex;
   flex-direction: row;
   align-items: center;
-  justify-content: space-between;
-  gap: 20px;
+  justify-content: center;
+  gap: 16px;
   pointer-events: auto;
 }
 .weapon-hud .stat-row {
@@ -345,16 +344,16 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg-d
   justify-content: center;
   gap: 4px;
 }
-.weapon-hud .stat-row:nth-child(1),
-.weapon-hud .stat-row:nth-child(2) {
+.weapon-hud .hud-tether,
+.weapon-hud .hud-stamina {
   flex: 1.2;
 }
-.weapon-hud .stat-row:nth-child(3) {
-  flex: 0.6;
+.weapon-hud .hud-weapon {
+  flex: 1.0;
   align-items: center;
 }
-.weapon-hud .stat-row:nth-child(4) {
-  flex: 1.5;
+.weapon-hud .hud-inventory {
+  flex: 1.8;
   border-left: 1px solid rgba(0,240,255,0.15);
   padding-left: 16px;
 }
@@ -569,9 +568,9 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg-d
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-top: 8px;
-  border-top: 1px dashed rgba(0, 240, 255, 0.15);
-  padding-top: 10px;
+  border-left: 1px dashed rgba(0, 240, 255, 0.15);
+  padding-left: 16px;
+  flex: 1.8;
 }
 .shortcut-badge {
   font-family: var(--font-display);

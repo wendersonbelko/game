@@ -425,23 +425,53 @@ function startInGame() {
   // Reseta timer e spawna o primeiro item logo ao iniciar
   pickupSpawnTimer = PICKUP_SPAWN_INTERVAL;
   pickups = [];
+  
   const ids = [...players.keys()];
-  const hotId = ids[Math.floor(Math.random() * ids.length)];
-  const hotPlayer = players.get(hotId);
-  if (hotPlayer) {
-    hotPlayer.isHot = true;
-    hotPlayer.speed = HOT_SPEED;
-    hotPlayer.health = 100;
-    hotPlayer.machinegunTimer = 0;
-    hotPlayer.shieldTimer = 0;
-    hotPlayer.invisibilityTimer = 0;
-    hotPlayer.empTimer = 0;
-    hotPlayer.stamina = 600;
-    hotPlayer.isSprinting = false;
-    hotPlayer.overdriveTimer = 0;
-    hotPlayer.trackerTimer = 0;
+  const totalPlayers = ids.length;
+
+  // Escalonamento dinâmico de Hots baseados na quantidade total de jogadores ativos
+  let hotCount = 1;
+  if (totalPlayers >= 6 && totalPlayers <= 9) {
+    hotCount = 2;
+  } else if (totalPlayers >= 10) {
+    hotCount = 3;
   }
-  broadcast({ type: 'phaseChange', phase: Phase.INGAME, timer: GAME_SECS, hotAlphaId: hotId });
+
+  // Algoritmo Fisher-Yates para misturar os IDs aleatoriamente
+  const shuffledIds = [...ids];
+  for (let i = shuffledIds.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffledIds[i], shuffledIds[j]] = [shuffledIds[j], shuffledIds[i]];
+  }
+
+  const selectedHotIds = shuffledIds.slice(0, hotCount);
+
+  // Transforma os jogadores selecionados em Hots
+  for (const hotId of selectedHotIds) {
+    const hotPlayer = players.get(hotId);
+    if (hotPlayer) {
+      hotPlayer.isHot = true;
+      hotPlayer.speed = HOT_SPEED;
+      hotPlayer.health = 100;
+      hotPlayer.machinegunTimer = 0;
+      hotPlayer.shieldTimer = 0;
+      hotPlayer.invisibilityTimer = 0;
+      hotPlayer.empTimer = 0;
+      hotPlayer.stamina = 600;
+      hotPlayer.isSprinting = false;
+      hotPlayer.overdriveTimer = 0;
+      hotPlayer.trackerTimer = 0;
+    }
+  }
+
+  broadcast({ 
+    type: 'phaseChange', 
+    phase: Phase.INGAME, 
+    timer: GAME_SECS, 
+    hotAlphaId: selectedHotIds[0], // Compatibilidade com lógica legada de id único
+    hotAlphaIds: selectedHotIds   // Array completo para o banner do frontend
+  });
+
   // Spawna o primeiro pickup imediatamente ao começar a partida (dobro do inicial)
   spawnRandomPickup();
   spawnRandomPickup();
@@ -717,8 +747,9 @@ function performRaycast(currentPlayer, tx, ty, angleOffset = 0, isMachinegun = f
         if (playerHit.reviveImmunityTimer > 0) {
           // Imune! Não perde HP nem moedas
         } else {
-          // Metralhadora causa 15 por tiro (45 total se acertar o spray triplo!), tiro normal tira 34
-          playerHit.health -= isMachinegun ? 15 : 34;
+          // Metralhadora causa 10 por tiro (com +1.5x de resistência), tiro normal tira 22.6
+          playerHit.health -= isMachinegun ? 10 : 22.6;
+          playerHit.stillTicks = 0; // Reseta cronômetro de cura ao tomar tiro!
           
           // NOVO: Dropar moeda ao tomar tiro!
           spawnCoinAt(playerHit.x + PLAYER_SIZE / 2, playerHit.y + PLAYER_SIZE / 2);
@@ -788,6 +819,7 @@ wss.on('connection', (ws) => {
         speedDebuffTimer: 0,
         holdEnergy: 300,
         reviveImmunityTimer: 0,
+        stillTicks: 0,
 
         // --- Buffs v6 ---
         speedBoostTimer: 0,
@@ -1084,6 +1116,7 @@ wss.on('connection', (ws) => {
             stunTimer: 0,
             speedDebuffTimer: 0,
             holdEnergy: 300,
+            stillTicks: 0,
 
             speedBoostTimer: 0,
             machinegunTimer: 0,
@@ -1155,6 +1188,14 @@ function triggerBotShoot(bot, tx, ty) {
   if (bot.isStunned) return;
   if (bot.reloadTimer > 0) return;
   if (bot.ammo <= 0) return;
+
+  // Erro de mira dinâmico baseado na distância (mais longe = maior dispersão/desvio)
+  const dx = tx - (bot.x + PLAYER_SIZE / 2);
+  const dy = ty - (bot.y + PLAYER_SIZE / 2);
+  const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+  const noiseScale = 22 + (dist * 0.16); // dist=500 -> 102px de desvio máximo
+  tx += (Math.random() - 0.5) * noiseScale;
+  ty += (Math.random() - 0.5) * noiseScale;
 
   bot.ammo--;
   if (bot.ammo <= 0) {
@@ -2002,6 +2043,22 @@ function gameTick() {
         p.health = 100; // Recupera totalmente o sangue
         p.reviveImmunityTimer = 3 * TICK_RATE; // 3 segundos de imunidade infinita ao reviver!
       }
+    }
+
+    // 2.5. Cura de Caçadores (Hots) ao ficar parado (3s início, 10s para encher 100%)
+    if (p.isHot && !p.isStunned && p.health < 100) {
+      const isMoving = p.input.up || p.input.down || p.input.left || p.input.right;
+      if (isMoving) {
+        p.stillTicks = 0;
+      } else {
+        p.stillTicks = (p.stillTicks || 0) + 1;
+        if (p.stillTicks >= 3 * TICK_RATE) {
+          // Cura proporcional a 10 HP por segundo = (10 / TICK_RATE) por tick
+          p.health = Math.min(100, p.health + 10 / TICK_RATE);
+        }
+      }
+    } else {
+      p.stillTicks = 0;
     }
 
     // 3. Debuff de velocidade por tiro (0.5s)
