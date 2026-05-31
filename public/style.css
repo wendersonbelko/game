@@ -1,38 +1,44 @@
-/* BraainHot v2 — Design System */
+/* GridRun: Overcharge — Design System */
 :root {
-  --bg-dark: #07070d;
+  --bg-dark: #05050b;
   --neon-cyan: #00f0ff;
-  --neon-red: #ff2244;
+  --neon-magenta: #ff007f;
   --neon-orange: #ff6600;
   --neon-green: #00ff88;
   --neon-purple: #8844ff;
   --text-main: #e0e8f0;
   --text-dim: #6a7a8a;
-  --glass-bg: rgba(15, 15, 35, 0.85);
-  --glass-border: rgba(0, 240, 255, 0.15);
+  --glass-bg: rgba(10, 10, 20, 0.85);
+  --glass-border: rgba(0, 240, 255, 0.18);
   --font-display: 'Orbitron', sans-serif;
   --font-body: 'Rajdhani', sans-serif;
-  --radius: 12px;
+  --radius: 16px;
 }
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg-dark); color: var(--text-main); font-family: var(--font-body); }
 .hidden { display: none !important; }
 
-#gameCanvas { position: fixed; inset: 0; width: 100%; height: 100%; background: #050510; display: none; cursor: default; }
+#gameCanvas { position: fixed; inset: 0; width: 100%; height: 100%; background: #030307; display: none; cursor: default; }
 #gameCanvas.grabbing { cursor: grabbing; }
 
 /* ── Lobby ── */
 #lobby { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 100; }
-.lobby-bg { position: absolute; inset: 0; background: radial-gradient(ellipse at 20% 50%, rgba(0,120,255,0.08) 0%, transparent 60%), radial-gradient(ellipse at 80% 50%, rgba(255,34,68,0.06) 0%, transparent 60%), var(--bg-dark); }
+.lobby-bg { position: absolute; inset: 0; background: radial-gradient(ellipse at 20% 50%, rgba(0,120,255,0.08) 0%, transparent 60%), radial-gradient(ellipse at 80% 50%, rgba(255,0,127,0.06) 0%, transparent 60%), var(--bg-dark); }
 .lobby-bg::before { content:''; position: absolute; inset:0; background-image: linear-gradient(rgba(0,240,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(0,240,255,0.03) 1px, transparent 1px); background-size: 40px 40px; animation: gridScroll 20s linear infinite; }
 @keyframes gridScroll { to { background-position: 40px 40px; } }
 .lobby-content { position: relative; z-index:1; text-align: center; max-width: 700px; width: 90%; }
 
 .game-title { font-family: var(--font-display); font-size: clamp(3rem,8vw,5.5rem); font-weight:900; letter-spacing:4px; margin-bottom:4px; line-height:1; animation: titlePulse 3s ease-in-out infinite; }
-.title-brain { color: var(--neon-cyan); text-shadow: 0 0 20px rgba(0,240,255,0.6), 0 0 60px rgba(0,240,255,0.2); }
-.title-hot { color: var(--neon-red); text-shadow: 0 0 20px rgba(255,34,68,0.6), 0 0 60px rgba(255,34,68,0.2); animation: hotFlicker 2s ease-in-out infinite alternate; }
+.title-brain { color: var(--neon-cyan); text-shadow: 0 0 20px rgba(0,240,255,0.6), 0 0 60px rgba(0,240,255,0.2); animation: titleGlitch 4s step-end infinite; }
+.title-hot { color: var(--neon-magenta); text-shadow: 0 0 20px rgba(255,0,127,0.6), 0 0 60px rgba(255,0,127,0.2); animation: titleGlitch 4s step-end infinite reverse; }
 @keyframes titlePulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.02)} }
-@keyframes hotFlicker { 0%{opacity:1} 45%{opacity:1} 50%{opacity:0.7} 55%{opacity:1} 100%{opacity:1} }
+@keyframes titleGlitch {
+  0%, 90% { text-shadow: 0 0 20px currentColor, 0 0 50px rgba(0,0,0,0.5); }
+  92% { text-shadow: -4px -2px 0 var(--neon-magenta), 4px 2px 0 var(--neon-cyan); filter: hue-rotate(90deg); }
+  94% { text-shadow: 4px 2px 0 var(--neon-magenta), -4px -2px 0 var(--neon-cyan); filter: grayscale(0.5); }
+  96% { text-shadow: -2px 4px 0 var(--neon-magenta), 2px -4px 0 var(--neon-cyan); }
+  98%, 100% { text-shadow: 0 0 20px currentColor, 0 0 50px rgba(0,0,0,0.5); }
+}
 .game-subtitle { font-family: var(--font-display); font-size:0.85rem; color: var(--text-dim); letter-spacing:6px; margin-bottom:40px; }
 
 /* ── Join Box ── */
@@ -73,10 +79,10 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg-d
 .instructions { display:flex; gap:16px; justify-content:center; flex-wrap:wrap; }
 .instr-card { background: var(--glass-bg); border:1px solid var(--glass-border); border-radius: var(--radius); padding:18px 16px; flex:1; min-width:150px; max-width:200px; backdrop-filter: blur(12px); transition: transform 0.2s; }
 .instr-card:hover { transform: translateY(-4px); }
-.instr-card.hot-card { border-color: rgba(255,34,68,0.2); }
+.instr-card.hot-card { border-color: rgba(255,0,127,0.2); }
 .instr-icon { font-size:2rem; display:block; margin-bottom:8px; }
 .instr-card h4 { font-family: var(--font-display); font-size:0.8rem; letter-spacing:2px; margin-bottom:6px; color: var(--neon-cyan); }
-.instr-card.hot-card h4 { color: var(--neon-red); }
+.instr-card.hot-card h4 { color: var(--neon-magenta); }
 .instr-card p { font-size:0.8rem; color: var(--text-dim); line-height:1.4; }
 
 /* ── HUD ── */
@@ -121,8 +127,8 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg-d
   padding: 0 14px;
 }
 #hudTimer.urgent {
-  color: var(--neon-red);
-  text-shadow: 0 0 20px rgba(255,34,68,0.5);
+  color: var(--neon-magenta);
+  text-shadow: 0 0 20px rgba(255,0,127,0.5);
   animation: urgentPulse 0.5s ease-in-out infinite;
 }
 @keyframes urgentPulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.08)} }
@@ -135,7 +141,7 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg-d
   font-weight: bold;
 }
 .hud-runners { color: var(--neon-cyan); text-shadow: 0 0 6px var(--neon-cyan); }
-.hud-hots { color: var(--neon-red); text-shadow: 0 0 6px var(--neon-red); }
+.hud-hots { color: var(--neon-magenta); text-shadow: 0 0 6px var(--neon-magenta); }
 #hudFeed {
   position: fixed;
   top: 76px;
@@ -176,17 +182,17 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg-d
 @keyframes endPop { from{transform:scale(0.7);opacity:0} to{transform:scale(1);opacity:1} }
 #endTitle { font-family: var(--font-display); font-size: clamp(2rem,6vw,4rem); font-weight:900; letter-spacing:6px; margin-bottom:16px; }
 #endTitle.runners-win { color: var(--neon-cyan); text-shadow: 0 0 30px rgba(0,240,255,0.5); }
-#endTitle.hots-win { color: var(--neon-red); text-shadow: 0 0 30px rgba(255,34,68,0.5); }
+#endTitle.hots-win { color: var(--neon-magenta); text-shadow: 0 0 30px rgba(255,0,127,0.5); }
 #endMessage { font-size:1.2rem; color: var(--text-dim); margin-bottom:12px; }
 .end-sub { font-family: var(--font-display); font-size:0.7rem; letter-spacing:3px; color: var(--text-dim); opacity:0.6; }
 
 #hotSelectScreen { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(5,5,16,0.8); z-index:150; backdrop-filter: blur(4px); }
 .hot-select-content { text-align:center; animation: hotSelectPop 0.6s cubic-bezier(0.34,1.56,0.64,1); position:relative; }
 @keyframes hotSelectPop { from{transform:scale(0.3);opacity:0} to{transform:scale(1);opacity:1} }
-.fire-ring { width:200px; height:200px; border-radius:50%; border:4px solid var(--neon-red); margin:0 auto 24px; box-shadow: 0 0 40px rgba(255,34,68,0.4), inset 0 0 40px rgba(255,34,68,0.2); animation: fireRingSpin 2s linear infinite; }
-@keyframes fireRingSpin { to{transform:rotate(360deg); box-shadow: 0 0 60px rgba(255,34,68,0.6), inset 0 0 50px rgba(255,34,68,0.3);} }
+.fire-ring { width:200px; height:200px; border-radius:50%; border:4px solid var(--neon-magenta); margin:0 auto 24px; box-shadow: 0 0 40px rgba(255,0,127,0.4), inset 0 0 40px rgba(255,0,127,0.2); animation: fireRingSpin 2s linear infinite; }
+@keyframes fireRingSpin { to{transform:rotate(360deg); box-shadow: 0 0 60px rgba(255,0,127,0.6), inset 0 0 50px rgba(255,0,127,0.3);} }
 .hot-select-content h2 { font-family: var(--font-display); font-size:1.5rem; letter-spacing:6px; color: var(--neon-orange); text-shadow: 0 0 20px rgba(255,102,0,0.5); margin-bottom:12px; }
-#hotSelectName { font-family: var(--font-display); font-size:2.5rem; font-weight:900; color: var(--neon-red); text-shadow: 0 0 30px rgba(255,34,68,0.6); }
+#hotSelectName { font-family: var(--font-display); font-size:2.5rem; font-weight:900; color: var(--neon-magenta); text-shadow: 0 0 30px rgba(255,0,127,0.6); }
 
 ::-webkit-scrollbar { width:4px; } ::-webkit-scrollbar-track { background:transparent; } ::-webkit-scrollbar-thumb { background: var(--neon-cyan); border-radius:2px; }
 
@@ -233,14 +239,14 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg-d
 
 /* ── HUD Leave Button ── */
 .leave-btn {
-  background: rgba(255,34,68,0.15); border: 1px solid var(--neon-red);
-  color: var(--neon-red); border-radius: 6px; font-family: var(--font-display);
+  background: rgba(255,0,127,0.15); border: 1px solid var(--neon-magenta);
+  color: var(--neon-magenta); border-radius: 6px; font-family: var(--font-display);
   font-size: 0.75rem; font-weight: 700; letter-spacing: 1.5px;
   padding: 6px 12px; cursor: pointer; pointer-events: auto;
   transition: background 0.2s, color 0.2s, box-shadow 0.2s, transform 0.15s;
   margin-left: 20px;
 }
-.leave-btn:hover { background: var(--neon-red); color: #000; box-shadow: 0 0 12px rgba(255,34,68,0.4); transform: translateY(-1px); }
+.leave-btn:hover { background: var(--neon-magenta); color: #000; box-shadow: 0 0 12px rgba(255,0,127,0.4); transform: translateY(-1px); }
 
 /* ── PAINEL DE JOGADORES GLASSMORPHIC ── */
 .player-list-panel {
@@ -306,14 +312,14 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg-d
   font-size: 0.62rem; font-family: var(--font-display); font-weight: bold;
 }
 .status-tag-runner { color: var(--neon-cyan); }
-.status-tag-hot { color: var(--neon-red); }
+.status-tag-hot { color: var(--neon-magenta); }
 .status-tag-stunned { color: var(--neon-purple); animation: textFlicker 1s infinite alternate; }
 .hp-bar-outer {
   width: 100%; height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden;
 }
 .hp-bar-inner {
-  height: 100%; background: linear-gradient(90deg, var(--neon-red), #ff6600);
-  box-shadow: 0 0 8px rgba(255,34,68,0.5); transition: width 0.2s;
+  height: 100%; background: linear-gradient(90deg, var(--neon-magenta), #ff6600);
+  box-shadow: 0 0 8px rgba(255,0,127,0.5); transition: width 0.2s;
 }
 
 /* ── HUD DE ARMAS & ENERGIA CENTRAL (v11) ── */
@@ -383,8 +389,8 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg-d
   box-shadow: 0 0 8px var(--neon-cyan);
 }
 .energy-fill.low {
-  background: var(--neon-red);
-  box-shadow: 0 0 8px var(--neon-red);
+  background: var(--neon-magenta);
+  box-shadow: 0 0 8px var(--neon-magenta);
 }
 .stamina-fill {
   background: var(--neon-orange);
@@ -413,7 +419,7 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg-d
   font-family: var(--font-display);
   font-size: 0.65rem;
   letter-spacing: 1px;
-  color: var(--neon-red);
+  color: var(--neon-magenta);
   font-weight: 900;
   text-align: center;
   animation: urgentPulse 0.6s infinite alternate;

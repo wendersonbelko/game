@@ -690,7 +690,7 @@ function handleMessage(msg) {
       break;
 
     case 'coinSpawned':
-      spawnImpactSpark(msg.coin.x + 8, msg.coin.y + 8, '#ffcc00');
+      spawnImpactSpark(msg.coin.x + 8, msg.coin.y + 8, '#00f0ff');
       break;
 
     case 'coinCollected':
@@ -698,10 +698,10 @@ function handleMessage(msg) {
       const collector = players.get(msg.playerId);
       if (collector) {
         for (let k = 0; k < 15; k++) {
-          spawnParticle(collector.x + 14, collector.y + 14, '#ffcc00', 20 + Math.random()*15, 3.5);
+          spawnParticle(collector.x + 14, collector.y + 14, '#00f0ff', 20 + Math.random()*15, 3.5);
         }
       }
-      addFeedItem(`🪙 ${msg.playerName} coletou uma Moeda Dourada!`);
+      addFeedItem(`⚡ ${msg.playerName} coletou uma Célula de Energia!`);
       playCoinSfx();
       break;
 
@@ -735,11 +735,11 @@ function handleMessage(msg) {
         supernova: 'SUPERNOVA 🔥 (Calor & Velocidade)',
         gravity: 'AURA GRAVITACIONAL 🕸️ (Lentidão em área)',
         invisibility: 'CAMUFLAGEM HOLOGRÁFICA 👤 (Fique Invisível)',
-        emp: 'PULSO CYBER EMP ⚡ (Desativa armas/tether dos corredores)',
+        emp: 'PULSO CYBER EMP ⚡ (Desativa armas/tether dos runners)',
         overdrive: 'CANHÃO OVERDRIVE 🔫 (Munição Infinita & Sem Recarga!)',
-        tracker: 'RASTREADOR TÉRMICO 🎯 (Revela todos os corredores!)',
-        repel: 'PULSO REPULSOR 🛡️ (Empurra Hots ao redor)',
-        magnetic: 'VÓRTEX MAGNÉTICO 🧲 (Puxa tudo ao redor)'
+        tracker: 'RASTREADOR TÉRMICO 🎯 (Revela todos os runners!)',
+        repel: 'PULSO REPULSOR 🛡️ (Empurra Overcharged ao redor)',
+        magnetic: 'VÓRTEX MAGNET 🧲 (Puxa tudo ao redor)'
       };
       const label = itemNames[msg.itemType] || 'ITEM ESPECIAL';
       addFeedItem(`🎉 ${msg.playerName} coletou ${label}!`);
@@ -833,7 +833,7 @@ function updateHUD() {
 
   hudTimer.className = (phase === 'ingame' && timer <= 20) ? 'urgent' : '';
   hudRunners.textContent = `🏃 ${runnersCount}`;
-  hudHots.textContent = `🔥 ${hotsCount}`;
+  hudHots.textContent = `⚡ ${hotsCount}`;
 
   // Alerta sonoro dos 10 segundos finais da partida
   if (phase === 'ingame' && timer <= 10 && timer > 0 && !alert10sFired) {
@@ -972,7 +972,7 @@ function updateShopUI() {
   }
 
   shopPanel.classList.remove('hidden');
-  shopCoins.textContent = `🪙 ${me.coins || 0}`;
+  shopCoins.textContent = `⚡ ${me.coins || 0}`;
 
   const myRole = me.isHot ? 'hot' : 'runner';
   if (currentShopRole !== myRole) {
@@ -983,18 +983,18 @@ function updateShopUI() {
       { id: 'speed', name: '⚡ VELOCIDADE', desc: 'Super Velocidade (+40%)', price: 3 },
       { id: 'blink', name: '⚡ BLINK', desc: 'Teleporte Curto (160px)', price: 3 },
       { id: 'shield', name: '🛡️ PLASMA SHIELD', desc: 'Escudo Protetor', price: 4 },
-      { id: 'repel', name: '🛡️ PULSO REPULSOR', desc: 'Repele Hots ao Redor (6s)', price: 4 },
+      { id: 'repel', name: '🛡️ PULSO REPULSOR', desc: 'Repele Overcharged ao Redor (6s)', price: 4 },
       { id: 'machinegun', name: '🔫 BURST LASER', desc: 'Metralhadora Burst', price: 4 },
       { id: 'phaseshift', name: '🌀 PHASE SHIFT', desc: 'Atravessa Paredes (4s)', price: 5 },
-      { id: 'invisibility', name: '👤 CHAMELEON', desc: 'Invisibilidade (12s)', price: 5 },
+      { id: 'invisibility', name: '👤 CHAMELEON', desc: 'Camuflagem (10s)', price: 5 },
     ];
 
     const hotItems = [
       { id: 'speed', name: '⚡ VELOCIDADE', desc: 'Super Velocidade (+40%)', price: 3 },
       { id: 'tracker', name: '🎯 THERMAL RADAR', desc: 'Mira Neon Lock-On (10s)', price: 3 },
-      { id: 'gravity', name: '🕸️ AURA GRAVIDADE', desc: 'Desacelera Corredores', price: 4 },
-      { id: 'magnetic', name: '🧲 VÓRTEX MAGNET', desc: 'Puxa Corredores e Caixas (8s)', price: 4 },
-      { id: 'supernova', name: '🔥 SUPERNOVA', desc: 'Raio Contágio Ampliado', price: 4 },
+      { id: 'gravity', name: '🕸️ AURA GRAVIDADE', desc: 'Desacelera Runners', price: 4 },
+      { id: 'magnetic', name: '🧲 VÓRTEX MAGNET', desc: 'Puxa Runners e Caixas (8s)', price: 4 },
+      { id: 'supernova', name: '🔥 OVERCHARGE', desc: 'Raio Contágio Ampliado', price: 4 },
       { id: 'emp', name: '⚡ EMP HACK', desc: 'Desativa Armas/Tethers', price: 5 },
     ];
 
@@ -1081,10 +1081,10 @@ function updatePlayerList() {
       statusSpan.textContent = '⚡ REINICIANDO';
       statusSpan.className += ' status-tag-stunned';
     } else if (p.isHot) {
-      statusSpan.textContent = '🔥 PEGADOR';
+      statusSpan.textContent = '⚡ OVERCHARGED';
       statusSpan.className += ' status-tag-hot';
     } else {
-      statusSpan.textContent = '🏃 CORREDOR';
+      statusSpan.textContent = '🏃 RUNNER';
       statusSpan.className += ' status-tag-runner';
     }
     top.appendChild(statusSpan);
@@ -1156,7 +1156,7 @@ function showHotSelect(hotIds) {
   
   const titleEl = document.querySelector('.hot-select-content h2');
   if (titleEl) {
-    titleEl.textContent = names.length > 1 ? 'HOTS ALFAS SELECIONADOS' : 'HOT ALFA SELECIONADO';
+    titleEl.textContent = names.length > 1 ? 'SOBRECARGAS DETECTADAS' : 'SOBRECARGA DETECTADA';
   }
   
   hotSelectName.textContent = names.join(' & ');
@@ -1167,8 +1167,8 @@ function showHotSelect(hotIds) {
 function showEndScreen(w) {
   endScreen.classList.remove('hidden');
   endTitle.className = w === 'runners' ? 'runners-win' : 'hots-win';
-  endTitle.textContent = w === 'runners' ? '🏃 CORREDORES VENCEM!' : '🔥 HOTS VENCEM!';
-  endMessage.textContent = w === 'runners' ? 'O tempo acabou! Pelo menos um corredor sobreviveu!' : 'Todos foram infectados!';
+  endTitle.textContent = w === 'runners' ? '🏃 RUNNERS VENCEM!' : '⚡ OVERCHARGED VENCEM!';
+  endMessage.textContent = w === 'runners' ? 'O tempo expirou! Pelo menos um runner evitou a sobrecarga!' : 'Todos os runners foram sobrecarregados!';
 }
 
 // ── Particles & Lasers ──
@@ -1177,7 +1177,8 @@ function spawnParticle(x, y, color, life, speed, size) {
   particles.push({ x, y, vx: Math.cos(a) * Math.random() * speed, vy: Math.sin(a) * Math.random() * speed - 1.5, life, maxLife: life, color, size: size || 3 });
 }
 function spawnInfectionBurst(x, y) {
-  for (let i = 0; i < 25; i++) spawnParticle(x + 14, y + 14, `hsl(${10+Math.random()*30},100%,${50+Math.random()*30}%)`, 35 + Math.random() * 25, 4, 3 + Math.random() * 3);
+  // Burst de infecção rosa/magenta neon HSL(320 a 345)
+  for (let i = 0; i < 25; i++) spawnParticle(x + 14, y + 14, `hsl(${320+Math.random()*25},100%,${50+Math.random()*30}%)`, 35 + Math.random() * 25, 4, 3 + Math.random() * 3);
 }
 function spawnStunBurst(x, y) {
   for (let i = 0; i < 35; i++) spawnParticle(x + 14, y + 14, `hsl(280,100%,${60+Math.random()*20}%)`, 45 + Math.random() * 35, 6, 2.5 + Math.random() * 3);
@@ -1187,7 +1188,8 @@ function spawnImpactSpark(x, y, color) {
 }
 function spawnHotTrail(x, y) {
   if (Math.random() > 0.4) return;
-  spawnParticle(x + 14 + (Math.random()-0.5)*10, y + 14, `hsl(${Math.random()*40},100%,${50+Math.random()*30}%)`, 12 + Math.random() * 12, 0.8, 2 + Math.random() * 2);
+  // Trail do Overcharged com paleta neon magenta HSL(320 a 345)
+  spawnParticle(x + 14 + (Math.random()-0.5)*10, y + 14, `hsl(${320+Math.random()*25},100%,${50+Math.random()*30}%)`, 12 + Math.random() * 12, 0.8, 2 + Math.random() * 2);
 }
 function spawnStunTrail(x, y) {
   if (Math.random() > 0.3) return;
@@ -1494,8 +1496,8 @@ function drawCoins() {
     ctx.scale(Math.abs(rotateScale) < 0.15 ? 0.15 : rotateScale, 1);
     
     ctx.shadowBlur = 12;
-    ctx.shadowColor = '#ffcc00';
-    ctx.fillStyle = '#ffcc00';
+    ctx.shadowColor = '#00f0ff';
+    ctx.fillStyle = '#00f0ff';
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 1.5;
     
@@ -1505,7 +1507,7 @@ function drawCoins() {
     ctx.stroke();
     
     // Detalhe interno da moeda
-    ctx.strokeStyle = '#e5a900';
+    ctx.strokeStyle = '#00c0f0';
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.arc(0, 0, 4, 0, Math.PI * 2);
@@ -1514,7 +1516,7 @@ function drawCoins() {
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 7px Rajdhani';
     ctx.textAlign = 'center';
-    ctx.fillText('$', 0, 2.5);
+    ctx.fillText('⚡', 0, 2.5);
     
     ctx.restore();
   }
@@ -1530,16 +1532,16 @@ function drawPlayers() {
     const myPlayer = players.get(myId);
     if (myPlayer && myPlayer.isHot && myPlayer.trackerTimer > 0 && !p.isHot) {
       ctx.save();
-      ctx.strokeStyle = 'rgba(255, 34, 68, 0.75)';
+      ctx.strokeStyle = 'rgba(255, 0, 127, 0.8)';
       ctx.lineWidth = 1.8;
-      ctx.shadowColor = '#ff2244';
+      ctx.shadowColor = '#ff007f';
       ctx.shadowBlur = 10;
       
       // Mira quadrada principal
       ctx.strokeRect(cx - sz/2 - 4, cy - sz/2 - 4, sz + 8, sz + 8);
       
       // Cantos de mira cyberpunk reticular
-      ctx.fillStyle = '#ff2244';
+      ctx.fillStyle = '#ff007f';
       ctx.fillRect(cx - sz/2 - 6, cy - sz/2 - 6, 6, 2);
       ctx.fillRect(cx - sz/2 - 6, cy - sz/2 - 6, 2, 6);
       ctx.fillRect(cx + sz/2, cy - sz/2 - 6, 6, 2);
@@ -1550,7 +1552,7 @@ function drawPlayers() {
       ctx.fillRect(cx + sz/2 + 4, cy + sz/2, 2, 6);
 
       // Linha guia tracejada Hot -> Corredor
-      ctx.strokeStyle = 'rgba(255, 34, 68, 0.25)';
+      ctx.strokeStyle = 'rgba(255, 0, 127, 0.3)';
       ctx.lineWidth = 1;
       ctx.setLineDash([3, 5]);
       ctx.beginPath();
@@ -1591,7 +1593,7 @@ function drawPlayers() {
     // Rastro flamejante de Supernova para o Hot
     if (p.isHot && p.supernovaTimer > 0) {
       for (let k = 0; k < 2; k++) {
-        spawnParticle(p.x + 14 + (Math.random()-0.5)*15, p.y + 14, '#ffcc00', 16, 1.2, 2.5);
+        spawnParticle(p.x + 14 + (Math.random()-0.5)*15, p.y + 14, '#ff007f', 16, 1.2, 2.5);
       }
     }
 
@@ -1670,8 +1672,8 @@ function drawPlayers() {
       ctx.shadowColor = 'rgba(136,68,255,0.75)';
       ctx.shadowBlur = 18 + Math.sin(Date.now() / 150) * 6;
     } else if (p.isHot) {
-      // Se tiver Supernova, brilha MUITO mais quente e flamejante
-      ctx.shadowColor = p.supernovaTimer > 0 ? '#ff3300' : 'rgba(255,34,68,0.6)';
+      // Se tiver Supernova, brilha MUITO mais quente e flamejante (magenta/rosa neon)
+      ctx.shadowColor = p.supernovaTimer > 0 ? '#ff007f' : 'rgba(255,0,127,0.6)';
       ctx.shadowBlur = p.supernovaTimer > 0 ? 25 : (18 + Math.sin(Date.now() / 200) * 5);
     } else {
       ctx.shadowColor = p.color || '#00f0ff';
@@ -1689,9 +1691,9 @@ function drawPlayers() {
       ctx.fillStyle = grad;
     } else if (p.isHot) {
       const grad = ctx.createRadialGradient(cx, cy, 2, cx, cy, sz/2);
-      grad.addColorStop(0, '#ffcc00');
-      grad.addColorStop(0.5, p.supernovaTimer > 0 ? '#ff1100' : '#ff4400');
-      grad.addColorStop(1, '#cc0022');
+      grad.addColorStop(0, '#ffffff');
+      grad.addColorStop(0.5, p.supernovaTimer > 0 ? '#ff007f' : '#ff0055');
+      grad.addColorStop(1, '#990033');
       ctx.fillStyle = grad;
     } else {
       const baseColor = p.color || '#00f0ff';
@@ -1705,7 +1707,7 @@ function drawPlayers() {
 
     const hasPhaseShift = p.phaseshiftTimer > 0;
     ctx.lineWidth = isMe ? 2.5 : 1.5;
-    ctx.strokeStyle = hasPhaseShift ? '#00ff88' : (isMe ? '#ffffff' : (p.isStunned ? '#aa66ff' : (p.isHot ? '#ff6644' : (p.color || '#44ccff'))));
+    ctx.strokeStyle = hasPhaseShift ? '#00ff88' : (isMe ? '#ffffff' : (p.isStunned ? '#aa66ff' : (p.isHot ? '#ff007f' : (p.color || '#44ccff'))));
     ctx.stroke();
     ctx.restore();
 
@@ -1784,7 +1786,7 @@ function drawPlayers() {
     }
 
     // Nome
-    ctx.fillStyle = p.isStunned ? '#ccaaff' : (p.isHot ? '#ff8866' : (p.color || '#88ddff'));
+    ctx.fillStyle = p.isStunned ? '#ccaaff' : (p.isHot ? '#ff007f' : (p.color || '#88ddff'));
     ctx.font = 'bold 11px Rajdhani';
     ctx.textAlign = 'center';
     ctx.fillText(p.name, cx, p.y - 8);
@@ -1792,9 +1794,9 @@ function drawPlayers() {
     // Stunned tag regressiva
     if (p.isStunned && p.stunTimer > 0) {
       const remainingSecs = Math.ceil(p.stunTimer / 60);
-      ctx.fillStyle = '#ff2244';
+      ctx.fillStyle = '#ff007f';
       ctx.font = '9px Orbitron';
-      ctx.fillText(`⚡ PARALISADO (${remainingSecs}s)`, cx, p.y - 20);
+      ctx.fillText(`⚡ REINICIANDO (${remainingSecs}s)`, cx, p.y - 20);
     }
 
     // --- Floating Buff Labels v6 ---
@@ -1915,7 +1917,7 @@ function drawMinimap() {
   }
 
   for (const [id, p] of players) {
-    ctx.fillStyle = id === myId ? '#ffffff' : (p.isStunned ? '#aa66ff' : (p.isHot ? '#ff2244' : (p.color || '#00f0ff')));
+    ctx.fillStyle = id === myId ? '#ffffff' : (p.isStunned ? '#aa66ff' : (p.isHot ? '#ff007f' : (p.color || '#00f0ff')));
     ctx.fillRect(mx + p.x * sx - 1, my + p.y * sy - 1, 3, 3);
   }
 

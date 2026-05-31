@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BraainHot — Neon Tag Multiplayer</title>
-  <meta name="description" content="BraainHot: jogo multiplayer de pega-pega neon cyberpunk com lasers e armas.">
+  <title>GridRun: Overcharge — Neon Tag Arena</title>
+  <meta name="description" content="GridRun: Overcharge — Jogo multiplayer de fuga e infecção neon em arena cyberpunk com lasers, grids e sobrecarga de voltagem.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@400;600;700&display=swap" rel="stylesheet">
   <link rel="icon" type="image/png" href="favicon.png">
-  <link rel="stylesheet" href="style.css?v=11">
+  <link rel="stylesheet" href="style.css?v=12">
 </head>
 <body>
   <!-- LOBBY -->
@@ -16,9 +16,9 @@
     <div class="lobby-bg"></div>
     <div class="lobby-content">
       <h1 class="game-title">
-        <span class="title-brain">Braain</span><span class="title-hot">Hot</span>
+        <span class="title-brain">Grid</span><span class="title-hot">Run</span>
       </h1>
-      <p class="game-subtitle">NEON TAG — SOBREVIVA ÀS CHAMAS</p>
+      <p class="game-subtitle">OVERCHARGE HUNT — EVITE A INFECÇÃO</p>
 
       <div class="join-box">
         <label for="nameInput">SEU CODINOME</label>
@@ -33,18 +33,18 @@
       <div class="instructions">
         <div class="instr-card">
           <span class="instr-icon">🏃</span>
-          <h4>Corredores</h4>
-          <p>Aqueça por 60s. Defenda-se com a arma neon!</p>
+          <h4>Runners</h4>
+          <p>Mantenha a integridade da rede. Defenda-se com o Neon Impulser!</p>
         </div>
         <div class="instr-card hot-card">
-          <span class="instr-icon">🔥</span>
-          <h4>Hot</h4>
-          <p>Drene a vida do Hot para paralisá-lo por 10s!</p>
+          <span class="instr-icon">⚡</span>
+          <h4>Overcharged</h4>
+          <p>Drene a vida do Sobrecarregado para paralisá-lo por 10s!</p>
         </div>
         <div class="instr-card">
           <span class="instr-icon">📦</span>
-          <h4>Caixas</h4>
-          <p>Arraste por até 5s. Laser descarrega ao segurar!</p>
+          <h4>Tethers</h4>
+          <p>Arraste caixas por até 5s para criar barricadas!</p>
         </div>
       </div>
     </div>
@@ -57,11 +57,11 @@
     <span id="volumeLabel" class="volume-label">20%</span>
   </div>
 
-  <!-- LOJA CYBERPUNK (Novo na v7) -->
+  <!-- GRID SHOP (Novo na v7) -->
   <div id="shopPanel" class="shop-panel hidden">
     <div class="shop-header">
-      <span>🛒 CYBER-LOJA</span>
-      <span id="shopCoins" class="shop-coins-indicator">🪙 0</span>
+      <span>🛒 GRID SHOP</span>
+      <span id="shopCoins" class="shop-coins-indicator">⚡ 0</span>
     </div>
     <div id="shopItems" class="shop-items">
       <!-- Gerado dinamicamente via JS com base no time -->
@@ -79,7 +79,7 @@
       <div id="hudScore">
         <span id="hudRunners" class="hud-runners">🏃 0</span>
         <span class="hud-vs">VS</span>
-        <span id="hudHots" class="hud-hots">🔥 0</span>
+        <span id="hudHots" class="hud-hots">⚡ 0</span>
       </div>
     </div>
     <div id="hudFeed"></div>
@@ -107,7 +107,7 @@
     </div>
 
     <div class="stat-row hud-inventory">
-      <span class="stat-label">🎒 CYBER-INVENTÁRIO</span>
+      <span class="stat-label">🎒 GRID INVENTÁRIO</span>
       <div class="inventory-slots">
         <div id="slotQ" class="inventory-slot">
           <span class="inventory-slot-key">Q</span>
@@ -160,11 +160,11 @@
     </div>
   </div>
 
-  <!-- HOT SELECT -->
+  <!-- OVERCHARGE SELECT -->
   <div id="hotSelectScreen" class="hidden">
     <div class="hot-select-content">
       <div class="fire-ring"></div>
-      <h2>HOT ALFA SELECIONADO</h2>
+      <h2>SOBRECARGA DETECTADA</h2>
       <p id="hotSelectName"></p>
     </div>
   </div>

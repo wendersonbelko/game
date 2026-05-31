@@ -26,9 +26,9 @@ const MAP_W = 2720;
 const MAP_H = 2000;
 const PLAYER_SIZE = 28;
 const RUNNER_SPEED = 3.0;
-const HOT_SPEED = 3.4;
+const HOT_SPEED = 3.3;
 const WARMUP_SECS = 20; // 20 segundos de aquecimento antes da caçada
-const GAME_SECS = 120; // 2 minutos de caçada
+const GAME_SECS = 180;//3 minutos de caçada
 const ENDGAME_SECS = 8;
 const MIN_PLAYERS_TO_START = 3;
 const MAX_PLAYERS = 20;
@@ -37,7 +37,7 @@ const GRAB_RANGE = 70;
 const DRAG_SPEED = 4.5;
 
 const Phase = { LOBBY: 'lobby', WARMUP: 'warmup', INGAME: 'ingame', ENDGAME: 'endgame' };
-const PLAYER_COLORS = ['#00f0ff','#00ff88','#aa66ff','#ff66cc','#ffcc00','#ff8844','#66ffcc','#88aaff'];
+const PLAYER_COLORS = ['#00f0ff', '#00ff88', '#aa66ff', '#ff66cc', '#ffcc00', '#ff8844', '#66ffcc', '#88aaff'];
 
 // ─── Estado do Servidor Único ───
 const players = new Map(); // pId -> Player
@@ -88,7 +88,7 @@ function generateMap() {
   addWall(hx, hy, hw, T);
   addWall(hx, hy, T, hh);
   addWall(hx2 - T, hy, T, hh);
-  
+
   // Porta de entrada = gap de 4 tiles no meio da parede inferior
   addWall(hx, hy2 - T, 28 * T, T);
   addWall(hx + 32 * T, hy2 - T, 30 * T, T);
@@ -178,11 +178,11 @@ function generateMap() {
   for (const zoneDef of zonesToPlace) {
     let placed = false;
     let attempts = 0;
-    const zw = zoneDef.type === 'boost' 
-      ? (Math.floor(Math.random() * 2) + 4) * T 
+    const zw = zoneDef.type === 'boost'
+      ? (Math.floor(Math.random() * 2) + 4) * T
       : (Math.floor(Math.random() * 2) + 5) * T;
-    const zh = zoneDef.type === 'boost' 
-      ? (Math.floor(Math.random() * 2) + 2) * T 
+    const zh = zoneDef.type === 'boost'
+      ? (Math.floor(Math.random() * 2) + 2) * T
       : 3 * T;
 
     while (!placed && attempts < 100) {
@@ -234,7 +234,7 @@ function generateMap() {
 
       // Margem de 2px livre em volta para que as caixas não nasçam coladas em paredes
       if (!collidesWithWalls(rx - 2, ry - 2, s + 4, s + 4) &&
-          !collidesWithBoxes(rx - 2, ry - 2, s + 4, s + 4, -1)) {
+        !collidesWithBoxes(rx - 2, ry - 2, s + 4, s + 4, -1)) {
         pushables.push({
           id: nextBoxId++,
           x: rx, y: ry, w: s, h: s,
@@ -273,17 +273,17 @@ function collidesWithBoxes(x, y, w, h, excludeId) {
 function findSpawnPos() {
   const hx = 3 * TILE + TILE, hy = 3 * TILE + TILE;
   const hw = 60 * TILE, hh = 42 * TILE;
-  
+
   // Camada 1: 300 tentativas livre de paredes e caixas
   for (let tries = 0; tries < 300; tries++) {
     const x = hx + Math.random() * (hw - PLAYER_SIZE);
     const y = hy + Math.random() * (hh - PLAYER_SIZE);
     if (!collidesWithWalls(x, y, PLAYER_SIZE, PLAYER_SIZE) &&
-        !collidesWithBoxes(x, y, PLAYER_SIZE, PLAYER_SIZE, -1)) {
+      !collidesWithBoxes(x, y, PLAYER_SIZE, PLAYER_SIZE, -1)) {
       return { x, y };
     }
   }
-  
+
   // Camada 2: 200 tentativas livre apenas de paredes (fallback)
   for (let tries = 0; tries < 200; tries++) {
     const x = hx + Math.random() * (hw - PLAYER_SIZE);
@@ -347,7 +347,7 @@ function serializePlayer(p) {
 
     // Bot status v9
     isBot: !!p.isBot,
-    
+
     // Imunidade ao Reviver v10.2
     reviveImmunityTimer: p.reviveImmunityTimer || 0,
   };
@@ -367,7 +367,7 @@ function startWarmup() {
   pickups = [];
   coins = [];
   coinSpawnTimer = COIN_SPAWN_INTERVAL;
-  
+
   // Regenera o mapa de forma procedimental
   generateMap();
 
@@ -425,7 +425,7 @@ function startInGame() {
   // Reseta timer e spawna o primeiro item logo ao iniciar
   pickupSpawnTimer = PICKUP_SPAWN_INTERVAL;
   pickups = [];
-  
+
   const ids = [...players.keys()];
   const totalPlayers = ids.length;
 
@@ -464,10 +464,10 @@ function startInGame() {
     }
   }
 
-  broadcast({ 
-    type: 'phaseChange', 
-    phase: Phase.INGAME, 
-    timer: GAME_SECS, 
+  broadcast({
+    type: 'phaseChange',
+    phase: Phase.INGAME,
+    timer: GAME_SECS,
     hotAlphaId: selectedHotIds[0], // Compatibilidade com lógica legada de id único
     hotAlphaIds: selectedHotIds   // Array completo para o banner do frontend
   });
@@ -567,9 +567,9 @@ function spawnRandomPickup() {
     const rx = hx + TILE + Math.random() * (hw - 3 * TILE);
     const ry = hy + TILE + Math.random() * (hh - 3 * TILE);
 
-    if (!collidesWithWalls(rx - 10, ry - 10, 20, 20) && 
-        !collidesWithBoxes(rx - 10, ry - 10, 20, 20, -1)) {
-      
+    if (!collidesWithWalls(rx - 10, ry - 10, 20, 20) &&
+      !collidesWithBoxes(rx - 10, ry - 10, 20, 20, -1)) {
+
       const types = ['speed', 'machinegun', 'shield', 'supernova', 'gravity', 'invisibility', 'emp', 'phaseshift', 'blink', 'repel', 'magnetic'];
       const type = types[Math.floor(Math.random() * types.length)];
 
@@ -583,7 +583,7 @@ function spawnRandomPickup() {
       };
       pickups.push(item);
       spawned = true;
-      
+
       broadcast({ type: 'itemSpawned', item });
     }
   }
@@ -603,9 +603,9 @@ function spawnRandomCoin() {
     const rx = hx + TILE + Math.random() * (hw - 3 * TILE);
     const ry = hy + TILE + Math.random() * (hh - 3 * TILE);
 
-    if (!collidesWithWalls(rx - 8, ry - 8, 16, 16) && 
-        !collidesWithBoxes(rx - 8, ry - 8, 16, 16, -1)) {
-      
+    if (!collidesWithWalls(rx - 8, ry - 8, 16, 16) &&
+      !collidesWithBoxes(rx - 8, ry - 8, 16, 16, -1)) {
+
       const coin = {
         id: 'coin_' + nextCoinId++,
         x: rx - 8,
@@ -615,7 +615,7 @@ function spawnRandomCoin() {
       };
       coins.push(coin);
       spawned = true;
-      
+
       broadcast({ type: 'coinSpawned', coin });
     }
   }
@@ -699,11 +699,11 @@ function performRaycast(currentPlayer, tx, ty, angleOffset = 0, isMachinegun = f
       const targetBoxX = boxHit.x + ux * pushDist;
       const targetBoxY = boxHit.y + uy * pushDist;
       if (!collidesWithWalls(targetBoxX + 1, boxHit.y + 1, boxHit.w - 2, boxHit.h - 2) &&
-          !collidesWithBoxes(targetBoxX + 1, boxHit.y + 1, boxHit.w - 2, boxHit.h - 2, boxHit.id)) {
+        !collidesWithBoxes(targetBoxX + 1, boxHit.y + 1, boxHit.w - 2, boxHit.h - 2, boxHit.id)) {
         boxHit.x = targetBoxX;
       }
       if (!collidesWithWalls(boxHit.x + 1, targetBoxY + 1, boxHit.w - 2, boxHit.h - 2) &&
-          !collidesWithBoxes(boxHit.x + 1, targetBoxY + 1, boxHit.w - 2, boxHit.h - 2, boxHit.id)) {
+        !collidesWithBoxes(boxHit.x + 1, targetBoxY + 1, boxHit.w - 2, boxHit.h - 2, boxHit.id)) {
         boxHit.y = targetBoxY;
       }
       break;
@@ -731,11 +731,11 @@ function performRaycast(currentPlayer, tx, ty, angleOffset = 0, isMachinegun = f
       const targetPX = playerHit.x + ux * pushDist;
       const targetPY = playerHit.y + uy * pushDist;
       if (!collidesWithWalls(targetPX, playerHit.y, playerHit.w, playerHit.h) &&
-          !collidesWithBoxes(targetPX, playerHit.y, playerHit.w, playerHit.h, -1)) {
+        !collidesWithBoxes(targetPX, playerHit.y, playerHit.w, playerHit.h, -1)) {
         playerHit.x = targetPX;
       }
       if (!collidesWithWalls(playerHit.x, targetPY, playerHit.w, playerHit.h) &&
-          !collidesWithBoxes(playerHit.x, targetPY, playerHit.w, playerHit.h, -1)) {
+        !collidesWithBoxes(playerHit.x, targetPY, playerHit.w, playerHit.h, -1)) {
         playerHit.y = targetPY;
       }
 
@@ -750,7 +750,7 @@ function performRaycast(currentPlayer, tx, ty, angleOffset = 0, isMachinegun = f
           // Metralhadora causa 10 por tiro (com +1.5x de resistência), tiro normal tira 22.6
           playerHit.health -= isMachinegun ? 10 : 22.6;
           playerHit.stillTicks = 0; // Reseta cronômetro de cura ao tomar tiro!
-          
+
           // NOVO: Dropar moeda ao tomar tiro!
           spawnCoinAt(playerHit.x + PLAYER_SIZE / 2, playerHit.y + PLAYER_SIZE / 2);
 
@@ -928,7 +928,7 @@ wss.on('connection', (ws) => {
     // ── GRAB CAIXAS ──
     if (msg.type === 'grab') {
       if (currentPlayer.grabbedBox) return;
-      if (currentPlayer.holdEnergy <= 30) return; 
+      if (currentPlayer.holdEnergy <= 30) return;
 
       const box = pushables.find(b => b.id === msg.boxId);
       if (!box || box.grabbedBy) return;
@@ -984,17 +984,17 @@ wss.on('connection', (ws) => {
         if (currentPlayer.input.down) bdy += 1;
         if (currentPlayer.input.left) bdx -= 1;
         if (currentPlayer.input.right) bdx += 1;
-        
+
         // Direção padrão se parado
         if (bdx === 0 && bdy === 0) {
           bdx = 1; // move para a direita por padrão se parado
         }
-        
+
         let len = Math.sqrt(bdx * bdx + bdy * bdy);
         const dist = 160; // 160px blink
         const ux = bdx / len;
         const uy = bdy / len;
-        
+
         let landed = false;
         // Tenta teleportar de 160px a 0px recuando de 8 em 8px para achar local livre
         for (let d = dist; d >= 0; d -= 8) {
@@ -1003,7 +1003,7 @@ wss.on('connection', (ws) => {
           const tx = Math.max(TILE, Math.min(MAP_W - TILE - currentPlayer.w, testX));
           const ty = Math.max(TILE, Math.min(MAP_H - TILE - currentPlayer.h, testY));
           if (!collidesWithWalls(tx, ty, currentPlayer.w, currentPlayer.h) &&
-              !collidesWithBoxes(tx, ty, currentPlayer.w, currentPlayer.h, -1)) {
+            !collidesWithBoxes(tx, ty, currentPlayer.w, currentPlayer.h, -1)) {
             currentPlayer.x = tx;
             currentPlayer.y = ty;
             landed = true;
@@ -1020,10 +1020,10 @@ wss.on('connection', (ws) => {
         currentPlayer.machinegunTimer = 15 * TICK_RATE;
         broadcast({ type: 'powerActivated', playerId: currentPlayer.id, powerType: 'machinegun' });
       } else if (powerKey === 'shield') {
-        currentPlayer.shieldTimer = 20 * TICK_RATE;
+        currentPlayer.shieldTimer = 15 * TICK_RATE;
         broadcast({ type: 'powerActivated', playerId: currentPlayer.id, powerType: 'shield' });
       } else if (powerKey === 'invisibility') {
-        currentPlayer.invisibilityTimer = 12 * TICK_RATE;
+        currentPlayer.invisibilityTimer = 10 * TICK_RATE;
         broadcast({ type: 'powerActivated', playerId: currentPlayer.id, powerType: 'invisibility' });
       } else if (powerKey === 'repel') {
         currentPlayer.repelTimer = 6 * TICK_RATE; // 6 segundos
@@ -1033,23 +1033,23 @@ wss.on('connection', (ws) => {
 
     if (msg.type === 'buyItem') {
       if (currentPlayer.isStunned) return;
-      
+
       const itemId = msg.itemId;
       const runnerPrices = { speed: 3, blink: 3, shield: 4, machinegun: 4, phaseshift: 5, invisibility: 5, repel: 4 };
       const hotPrices = { speed: 3, tracker: 3, gravity: 4, supernova: 4, emp: 5, magnetic: 4 };
-      
+
       const prices = currentPlayer.isHot ? hotPrices : runnerPrices;
       const price = prices[itemId];
       if (price === undefined) return;
-      
+
       if ((currentPlayer.coins || 0) < price) return;
-      
+
       if (!currentPlayer.isHot) {
         if (currentPlayer.slotQ && currentPlayer.slotE) return; // Sem espaço nos slots Q e E
       }
-      
+
       currentPlayer.coins -= price;
-      
+
       if (!currentPlayer.isHot) {
         if (!currentPlayer.slotQ) {
           currentPlayer.slotQ = itemId;
@@ -1511,10 +1511,10 @@ function tryActivatePowers(p, hot, dist) {
       p.machinegunTimer = 15 * TICK_RATE;
       broadcast({ type: 'powerActivated', playerId: p.id, powerType: 'machinegun' });
     } else if (key === 'shield') {
-      p.shieldTimer = 20 * TICK_RATE;
+      p.shieldTimer = 15 * TICK_RATE;
       broadcast({ type: 'powerActivated', playerId: p.id, powerType: 'shield' });
     } else if (key === 'invisibility') {
-      p.invisibilityTimer = 12 * TICK_RATE;
+      p.invisibilityTimer = 10 * TICK_RATE;
       broadcast({ type: 'powerActivated', playerId: p.id, powerType: 'invisibility' });
     } else if (key === 'repel') {
       p.repelTimer = 6 * TICK_RATE;
@@ -1832,12 +1832,12 @@ function runnerBotAI(p, env) {
       // Mensagens de chat divertidas e neon-imersivas
       if (releaseReason === "block") {
         if (Math.random() < 0.20) {
-          const msgs = ["Passagem fechada!", "Barricando a porta!", "Fica aí, caçador!", "Caminho bloqueado!"];
+          const msgs = ["Passagem fechada!", "Barricando a porta!", "Fica aí, sobrecarregado!", "Caminho bloqueado!"];
           broadcast({ type: 'chat', playerId: p.id, name: p.name, color: p.color, text: msgs[Math.floor(Math.random() * msgs.length)] });
         }
       } else if (releaseReason === "sabotage") {
         if (Math.random() < 0.35) {
-          const msgs = ["Desculpa, amigo! Cada um por si!", "Opa, deixei cair!", "O caçador prefere você!", "Foi mal, bloqueado!"];
+          const msgs = ["Desculpa, amigo! Cada um por si!", "Opa, deixei cair!", "A sobrecarga prefere você!", "Foi mal, bloqueado!"];
           broadcast({ type: 'chat', playerId: p.id, name: p.name, color: p.color, text: msgs[Math.floor(Math.random() * msgs.length)] });
         }
       }
@@ -2198,7 +2198,7 @@ function gameTick() {
 
       if (dist < 22) { // Colisão!
         p.coins = (p.coins || 0) + 1;
-        
+
         broadcast({
           type: 'coinCollected',
           playerId: p.id,
@@ -2207,7 +2207,7 @@ function gameTick() {
           coinId: coin.id,
           color: p.color
         });
-        
+
         coins.splice(i, 1);
         break; // sai do loop de jogadores para esta moeda
       }
@@ -2306,7 +2306,7 @@ function gameTick() {
           const mdy = (p2.y + PLAYER_SIZE / 2) - (p.y + PLAYER_SIZE / 2);
           const mdist = Math.sqrt(mdx * mdx + mdy * mdy);
           if (mdist > 0 && mdist <= 240) {
-            const pullStrength = 3.6 * (1 - mdist / 240); // Força diminui com a distância
+            const pullStrength = 2.8 * (1 - mdist / 240); // Força diminui com a distância
             fx += (mdx / mdist) * pullStrength;
             fy += (mdy / mdist) * pullStrength;
           }
@@ -2351,7 +2351,7 @@ function gameTick() {
             const pushDir = (box.x + box.w / 2 > p.x + p.w / 2) ? 1 : -1;
             const newBoxX = box.x + pushDir * overlapX;
             if (!collidesWithWalls(newBoxX + 1, box.y + 1, box.w - 2, box.h - 2) &&
-                !collidesWithBoxes(newBoxX + 1, box.y + 1, box.w - 2, box.h - 2, box.id)) {
+              !collidesWithBoxes(newBoxX + 1, box.y + 1, box.w - 2, box.h - 2, box.id)) {
               box.x = newBoxX;
             } else {
               p.x -= pushDir * overlapX;
@@ -2360,7 +2360,7 @@ function gameTick() {
             const pushDir = (box.y + box.h / 2 > p.y + p.h / 2) ? 1 : -1;
             const newBoxY = box.y + pushDir * overlapY;
             if (!collidesWithWalls(box.x + 1, newBoxY + 1, box.w - 2, box.h - 2) &&
-                !collidesWithBoxes(box.x + 1, newBoxY + 1, box.w - 2, box.h - 2, box.id)) {
+              !collidesWithBoxes(box.x + 1, newBoxY + 1, box.w - 2, box.h - 2, box.id)) {
               box.y = newBoxY;
             } else {
               p.y -= pushDir * overlapY;
@@ -2369,7 +2369,7 @@ function gameTick() {
         }
       }
     }
-    
+
     // Clamps
     p.x = Math.max(TILE, Math.min(MAP_W - TILE - p.w, p.x));
     p.y = Math.max(TILE, Math.min(MAP_H - TILE - p.h, p.y));
@@ -2393,13 +2393,13 @@ function gameTick() {
     const my = (ddy / dist) * spd;
 
     const nxB = box.x + mx;
-    if (!collidesWithWalls(nxB + 1, box.y + 1, box.w - 2, box.h - 2) && 
-        !collidesWithBoxes(nxB + 1, box.y + 1, box.w - 2, box.h - 2, box.id)) {
+    if (!collidesWithWalls(nxB + 1, box.y + 1, box.w - 2, box.h - 2) &&
+      !collidesWithBoxes(nxB + 1, box.y + 1, box.w - 2, box.h - 2, box.id)) {
       box.x = nxB;
     }
     const nyB = box.y + my;
-    if (!collidesWithWalls(box.x + 1, nyB + 1, box.w - 2, box.h - 2) && 
-        !collidesWithBoxes(box.x + 1, nyB + 1, box.w - 2, box.h - 2, box.id)) {
+    if (!collidesWithWalls(box.x + 1, nyB + 1, box.w - 2, box.h - 2) &&
+      !collidesWithBoxes(box.x + 1, nyB + 1, box.w - 2, box.h - 2, box.id)) {
       box.y = nyB;
     }
   }
@@ -2413,7 +2413,7 @@ function gameTick() {
         const bdy = (p.y + PLAYER_SIZE / 2) - (box.y + box.h / 2);
         const bdist = Math.sqrt(bdx * bdx + bdy * bdy);
         if (bdist > 35 && bdist <= 240) {
-          const pullStrength = 3.2 * (1 - bdist / 240); // Força diminui com a distância
+          const pullStrength = 2.5 * (1 - bdist / 240); // Força diminui com a distância
           bfx += (bdx / bdist) * pullStrength;
           bfy += (bdy / bdist) * pullStrength;
         }
@@ -2422,13 +2422,13 @@ function gameTick() {
 
     if (bfx !== 0 || bfy !== 0) {
       const nxBoxX = box.x + bfx;
-      if (!collidesWithWalls(nxBoxX + 1, box.y + 1, box.w - 2, box.h - 2) && 
-          !collidesWithBoxes(nxBoxX + 1, box.y + 1, box.w - 2, box.h - 2, box.id)) {
+      if (!collidesWithWalls(nxBoxX + 1, box.y + 1, box.w - 2, box.h - 2) &&
+        !collidesWithBoxes(nxBoxX + 1, box.y + 1, box.w - 2, box.h - 2, box.id)) {
         box.x = nxBoxX;
       }
       const nxBoxY = box.y + bfy;
-      if (!collidesWithWalls(box.x + 1, nxBoxY + 1, box.w - 2, box.h - 2) && 
-          !collidesWithBoxes(box.x + 1, nxBoxY + 1, box.w - 2, box.h - 2, box.id)) {
+      if (!collidesWithWalls(box.x + 1, nxBoxY + 1, box.w - 2, box.h - 2) &&
+        !collidesWithBoxes(box.x + 1, nxBoxY + 1, box.w - 2, box.h - 2, box.id)) {
         box.y = nxBoxY;
       }
     }
@@ -2442,7 +2442,7 @@ function gameTick() {
       for (const runner of runners) {
         const dx = (hot.x + hot.w / 2) - (runner.x + runner.w / 2);
         const dy = (hot.y + hot.h / 2) - (runner.y + runner.h / 2);
-        
+
         let infRad = INFECTION_RADIUS;
         if (hot.supernovaTimer > 0) infRad += 25; // Supernova aumenta raio de contágio!
 
@@ -2458,13 +2458,13 @@ function gameTick() {
             const huy = dy / len;
             const targetHotX = hot.x + hux * pushDist;
             const targetHotY = hot.y + huy * pushDist;
-            
+
             if (!collidesWithWalls(targetHotX, hot.y, hot.w, hot.h) &&
-                !collidesWithBoxes(targetHotX, hot.y, hot.w, hot.h, -1)) {
+              !collidesWithBoxes(targetHotX, hot.y, hot.w, hot.h, -1)) {
               hot.x = targetHotX;
             }
             if (!collidesWithWalls(hot.x, targetHotY, hot.w, hot.h) &&
-                !collidesWithBoxes(hot.x, targetHotY, hot.w, hot.h, -1)) {
+              !collidesWithBoxes(hot.x, targetHotY, hot.w, hot.h, -1)) {
               hot.y = targetHotY;
             }
 
