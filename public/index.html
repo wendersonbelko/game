@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@400;600;700&display=swap" rel="stylesheet">
   <link rel="icon" type="image/png" href="favicon.png">
-  <link rel="stylesheet" href="style.css?v=10">
+  <link rel="stylesheet" href="style.css?v=11">
 </head>
 <body>
   <!-- LOBBY -->
@@ -138,6 +138,9 @@
       <button id="togglePlayerListBtn" class="toggle-panel-btn">[-]</button>
     </div>
     <div id="playerListContent" class="panel-content"></div>
+    <div class="panel-footer" style="padding: 6px; border-top: 1px dashed rgba(0, 240, 255, 0.15); text-align: center;">
+      <button id="openBotsBtn" class="bots-confirm-btn" style="width: 100%; padding: 6px; font-size: 0.70rem; margin-top: 0; cursor: pointer;">🤖 ADICIONAR BOTS (B)</button>
+    </div>
   </div>
 
   <!-- BATE-PAPO (Novo na v5) -->
@@ -166,6 +169,34 @@
     </div>
   </div>
 
-  <script src="game.js?v=10"></script>
+  <!-- BOTS MODAL (Novo na v9) -->
+  <div id="botsModal" class="bots-modal hidden">
+    <div class="bots-modal-content">
+      <h2>🤖 JOGAR COM BOTS?</h2>
+      <p>Parece que você é o único sobrevivente online no momento. Gostaria de adicionar cyber-bots para treinar?</p>
+      
+      <div class="bots-select-row">
+        <label>QUANTIDADE DE BOTS:</label>
+        <div class="bots-number-line">
+          <button class="bots-num-btn" data-num="0">0</button>
+          <button class="bots-num-btn" data-num="1">1</button>
+          <button class="bots-num-btn" data-num="2">2</button>
+          <button class="bots-num-btn" data-num="3">3</button>
+          <button class="bots-num-btn" data-num="4">4</button>
+          <button class="bots-num-btn" data-num="5">5</button>
+          <button class="bots-num-btn" data-num="6">6</button>
+          <button class="bots-num-btn" data-num="7">7</button>
+          <button class="bots-num-btn" data-num="8">8</button>
+        </div>
+      </div>
+      
+      <div class="bots-modal-buttons">
+        <button id="confirmBotsBtn" class="bots-confirm-btn" disabled>CONFIRMAR</button>
+        <button id="closeBotsBtn" class="bots-close-btn">AGORA NÃO</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="game.js?v=11"></script>
 </body>
 </html>

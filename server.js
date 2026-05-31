@@ -301,7 +301,7 @@ function findSpawnPos() {
 function broadcast(msg) {
   const data = JSON.stringify(msg);
   for (const [, p] of players) {
-    if (p.ws.readyState === 1) p.ws.send(data);
+    if (p.ws && p.ws.readyState === 1) p.ws.send(data);
   }
 }
 
@@ -344,6 +344,12 @@ function serializePlayer(p) {
 
     // Economia v8
     coins: p.coins || 0,
+
+    // Bot status v9
+    isBot: !!p.isBot,
+    
+    // Imunidade ao Reviver v10.2
+    reviveImmunityTimer: p.reviveImmunityTimer || 0,
   };
 }
 
@@ -384,6 +390,7 @@ function startWarmup() {
     p.stunTimer = 0;
     p.speedDebuffTimer = 0;
     p.holdEnergy = 300;
+    p.reviveImmunityTimer = 0;
 
     // Reset Buffs v6
     p.speedBoostTimer = 0;
@@ -471,6 +478,7 @@ function resetGame() {
     p.stunTimer = 0;
     p.speedDebuffTimer = 0;
     p.holdEnergy = 300;
+    p.reviveImmunityTimer = 0;
 
     // Reset Buffs v6
     p.speedBoostTimer = 0;
@@ -704,19 +712,23 @@ function performRaycast(currentPlayer, tx, ty, angleOffset = 0, isMachinegun = f
       // Reduz velocidade por 0.5s (30 ticks)
       playerHit.speedDebuffTimer = 30;
 
-      // Se for Pegador, perde sangue.
+      // Se for Pegador, perde sangue (a menos que esteja imune ao reviver).
       if (playerHit.isHot && !playerHit.isStunned) {
-        // Metralhadora causa 15 por tiro (45 total se acertar o spray triplo!), tiro normal tira 34
-        playerHit.health -= isMachinegun ? 15 : 34;
-        
-        // NOVO: Dropar moeda ao tomar tiro!
-        spawnCoinAt(playerHit.x + PLAYER_SIZE / 2, playerHit.y + PLAYER_SIZE / 2);
+        if (playerHit.reviveImmunityTimer > 0) {
+          // Imune! Não perde HP nem moedas
+        } else {
+          // Metralhadora causa 15 por tiro (45 total se acertar o spray triplo!), tiro normal tira 34
+          playerHit.health -= isMachinegun ? 15 : 34;
+          
+          // NOVO: Dropar moeda ao tomar tiro!
+          spawnCoinAt(playerHit.x + PLAYER_SIZE / 2, playerHit.y + PLAYER_SIZE / 2);
 
-        if (playerHit.health <= 0) {
-          playerHit.health = 0;
-          playerHit.isStunned = true;
-          playerHit.stunTimer = 10 * TICK_RATE; // Paralisado por 10s
-          broadcast({ type: 'stunned', playerId: playerHit.id, name: playerHit.name });
+          if (playerHit.health <= 0) {
+            playerHit.health = 0;
+            playerHit.isStunned = true;
+            playerHit.stunTimer = 10 * TICK_RATE; // Paralisado por 10s
+            broadcast({ type: 'stunned', playerId: playerHit.id, name: playerHit.name });
+          }
         }
       }
       break;
@@ -775,6 +787,7 @@ wss.on('connection', (ws) => {
         stunTimer: 0,
         speedDebuffTimer: 0,
         holdEnergy: 300,
+        reviveImmunityTimer: 0,
 
         // --- Buffs v6 ---
         speedBoostTimer: 0,
@@ -815,6 +828,15 @@ wss.on('connection', (ws) => {
       }));
 
       broadcast({ type: 'playerJoined', player: serializePlayer(currentPlayer) });
+
+      setTimeout(() => {
+        if (players.has(pId)) {
+          const humanCount = [...players.values()].filter(p => !p.isBot).length;
+          if (humanCount === 1) {
+            ws.send(JSON.stringify({ type: 'offerBots' }));
+          }
+        }
+      }, 500);
 
       if (gamePhase === Phase.LOBBY && players.size >= MIN_PLAYERS_TO_START) {
         startWarmup();
@@ -1020,6 +1042,81 @@ wss.on('connection', (ws) => {
         broadcast({ type: 'itemBought', playerId: currentPlayer.id, itemId, coins: currentPlayer.coins });
       }
     }
+
+    if (msg.type === 'addBots') {
+      const count = parseInt(msg.count);
+      if (!isNaN(count) && count >= 0 && count <= 8) {
+        // Remove bots existentes primeiro para evitar acumular
+        for (const [id, p] of players) {
+          if (p.isBot) {
+            players.delete(id);
+            broadcast({ type: 'playerLeft', id });
+          }
+        }
+
+        const botNames = ['CyberBot_X', 'NeoDroid', 'ByteHunter', 'QuantumG', 'GlitchRun', 'ZeroCool', 'Vector_B', 'PixelFlee'];
+        const colors = PLAYER_COLORS;
+
+        for (let i = 0; i < count; i++) {
+          const bId = 'bot_' + nextPlayerId++;
+          const spawn = findSpawnPos();
+          const bot = {
+            id: bId,
+            name: botNames[i % botNames.length],
+            ws: null, // indica que é um bot local
+            isBot: true,
+            color: colors[i % colors.length],
+            x: spawn.x,
+            y: spawn.y,
+            w: PLAYER_SIZE,
+            h: PLAYER_SIZE,
+            isHot: false,
+            speed: RUNNER_SPEED,
+            alive: true,
+            input: { up: false, down: false, left: false, right: false, shift: false },
+            grabbedBox: null,
+            mouseWorld: null,
+
+            ammo: 3,
+            reloadTimer: 0,
+            health: 100,
+            isStunned: false,
+            stunTimer: 0,
+            speedDebuffTimer: 0,
+            holdEnergy: 300,
+
+            speedBoostTimer: 0,
+            machinegunTimer: 0,
+            shieldTimer: 0,
+            supernovaTimer: 0,
+            gravityTimer: 0,
+            invisibilityTimer: 0,
+            empTimer: 0,
+            stamina: 600,
+            isSprinting: false,
+            overdriveTimer: 0,
+            trackerTimer: 0,
+
+            slotQ: null,
+            slotE: null,
+            phaseshiftTimer: 0,
+            magnetTimer: 0,
+            repelTimer: 0,
+            coins: 0
+          };
+          players.set(bId, bot);
+          broadcast({ type: 'playerJoined', player: serializePlayer(bot) });
+        }
+
+        // Se o número total de jogadores (humano + bots) for menor que o mínimo de partida
+        // e o jogo estiver ativo, recuamos de forma elegante para o LOBBY
+        if (players.size < MIN_PLAYERS_TO_START && gamePhase !== Phase.LOBBY) {
+          resetGame();
+        } else if (gamePhase === Phase.LOBBY && players.size >= MIN_PLAYERS_TO_START) {
+          startWarmup();
+        }
+      }
+    }
   });
 
   ws.on('close', () => {
@@ -1031,6 +1128,14 @@ wss.on('connection', (ws) => {
       players.delete(currentPlayer.id);
       broadcast({ type: 'playerLeft', id: currentPlayer.id });
 
+      const humansLeft = [...players.values()].filter(p => !p.isBot);
+      if (humansLeft.length === 1) {
+        const remainingHuman = humansLeft[0];
+        if (remainingHuman.ws && remainingHuman.ws.readyState === 1) {
+          remainingHuman.ws.send(JSON.stringify({ type: 'offerBots' }));
+        }
+      }
+
       // Se não restar ninguém, destroi o servidor (retorna ao lobby)
       if (players.size === 0) {
         resetGame();
@@ -1041,6 +1146,805 @@ wss.on('connection', (ws) => {
   });
 });
 
+// ─── Lógica do Bot AI Avançada v10 ───
+// Sistema completo: Personalidades, Detecção de Travamento, Pathfinding Multinível,
+// Tiro Tático, Sabotagem, Barricada de Caixas, Sprint Inteligente, Coleta Pró-ativa.
+
+function triggerBotShoot(bot, tx, ty) {
+  if (bot.isHot) return;
+  if (bot.isStunned) return;
+  if (bot.reloadTimer > 0) return;
+  if (bot.ammo <= 0) return;
+
+  bot.ammo--;
+  if (bot.ammo <= 0) {
+    bot.reloadTimer = 5 * TICK_RATE;
+  }
+
+  if (bot.machinegunTimer > 0) {
+    performRaycast(bot, tx, ty, -0.06, true);
+    performRaycast(bot, tx, ty, 0, true);
+    performRaycast(bot, tx, ty, 0.06, true);
+  } else {
+    performRaycast(bot, tx, ty, 0, false);
+  }
+}
+
+// Inicialização lazy do estado de IA persistente por bot
+function ensureBotAI(p) {
+  if (!p.ai) {
+    const types = ['aggressive', 'defensive', 'collector', 'saboteur'];
+    p.ai = {
+      posHistory: [],
+      stuckTicks: 0,
+      unstuckTimer: 0,
+      unstuckAngle: 0,
+      shootCooldown: 0,
+      buyCooldown: 0,
+      personality: types[Math.floor(Math.random() * types.length)],
+      strafeDir: Math.random() < 0.5 ? 1 : -1,
+      strafeSwitchTimer: Math.floor(Math.random() * 120) + 60,
+      fleeAngleBias: (Math.random() - 0.5) * Math.PI / 2.5,
+      fleeAngleTimer: Math.floor(Math.random() * 200) + 100,
+      lastMoveAngle: Math.random() * Math.PI * 2,
+      boxCooldown: 0,
+      wanderTarget: null,
+      wanderTimer: 0,
+    };
+  }
+}
+
+// Verifica se o bot está em um corredor ou porta estreita
+function isInNarrowPassage(x, y, w, h) {
+  // Testa passagem horizontal (paredes próximas na esquerda e direita)
+  const leftWall = collidesWithWalls(x - 50, y, w, h);
+  const rightWall = collidesWithWalls(x + 50, y, w, h);
+  if (leftWall && rightWall) return true;
+
+  // Testa passagem vertical (paredes próximas acima e abaixo)
+  const topWall = collidesWithWalls(x, y - 50, w, h);
+  const bottomWall = collidesWithWalls(x, y + 50, w, h);
+  if (topWall && bottomWall) return true;
+
+  return false;
+}
+
+// Normaliza ângulo para [-PI, PI]
+function normalizeAngle(a) {
+  a = a % (2 * Math.PI);
+  if (a > Math.PI) a -= 2 * Math.PI;
+  if (a < -Math.PI) a += 2 * Math.PI;
+  return a;
+}
+
+// Detecção de travamento: verifica se o bot se moveu menos de 8px em 0.75s
+function checkBotStuck(p) {
+  const ai = p.ai;
+  ai.posHistory.push({ x: p.x, y: p.y });
+  if (ai.posHistory.length > 45) ai.posHistory.shift();
+
+  if (ai.posHistory.length >= 45) {
+    const o = ai.posHistory[0];
+    if (Math.sqrt((p.x - o.x) ** 2 + (p.y - o.y) ** 2) < 8) {
+      ai.stuckTicks++;
+      return true;
+    }
+    ai.stuckTicks = 0;
+  }
+  return false;
+}
+
+// Pathfinding aprimorado: testa múltiplas distâncias de look-ahead (24→14→7)
+function findSmartDir(p, idealAngle) {
+  const sweeps = [
+    0,
+    Math.PI / 8, -Math.PI / 8,
+    Math.PI / 4, -Math.PI / 4,
+    3 * Math.PI / 8, -3 * Math.PI / 8,
+    Math.PI / 2, -Math.PI / 2,
+    5 * Math.PI / 8, -5 * Math.PI / 8,
+    3 * Math.PI / 4, -3 * Math.PI / 4,
+    7 * Math.PI / 8, -7 * Math.PI / 8,
+    Math.PI
+  ];
+  const hasPhase = p.phaseshiftTimer && p.phaseshiftTimer > 0;
+
+  // Testa 3 distâncias: 24px (longe), 14px (médio), 7px (curto — ignora caixas para poder empurrá-las)
+  for (const testDist of [24, 14, 7]) {
+    for (const offset of sweeps) {
+      const a = idealAngle + offset;
+      const vx = Math.cos(a);
+      const vy = Math.sin(a);
+      const tx = p.x + vx * testDist;
+      const ty = p.y + vy * testDist;
+      // Na distância curta (7px), ignora caixas — a física de empurrão resolve o contato
+      const wallOk = !collidesWithWalls(tx, ty, p.w, p.h);
+      const boxOk = testDist <= 7 || !collidesWithBoxes(tx, ty, p.w, p.h, -1);
+      if (hasPhase || (wallOk && boxOk)) {
+        return { vx, vy };
+      }
+    }
+  }
+  return { vx: Math.cos(idealAngle), vy: Math.sin(idealAngle) };
+}
+
+// Calcula forças ambientais: Anti-Clumping expandido (120px) + Repulsão de Paredes/Caixas (50px)
+function calcEnvForces(p) {
+  let sepX = 0, sepY = 0, avoidX = 0, avoidY = 0;
+
+  // Separação anti-aglomeração: APENAS entre bots do mesmo time!
+  // Hot NÃO tem separação de Runners (precisa chegar perto para infectar)
+  // Runners têm separação entre si para não aglomerar
+  for (const [, p2] of players) {
+    if (p2.id === p.id) continue;
+    // Pula separação entre times opostos (Hot↔Runner) — a perseguição/fuga cuida disso
+    if (p.isHot !== p2.isHot) continue;
+    const dx = p.x - p2.x, dy = p.y - p2.y;
+    const d = Math.sqrt(dx * dx + dy * dy);
+    if (d > 0 && d < 100) {
+      const f = (100 - d) / 100;
+      sepX += (dx / d) * f * 3.0;
+      sepY += (dy / d) * f * 3.0;
+    }
+  }
+
+  // Repulsão contínua de paredes (raio 45px, força 3.5)
+  const wallRange = 45;
+  for (const w of walls) {
+    const cx = Math.max(w.x, Math.min(p.x + p.w / 2, w.x + w.w));
+    const cy = Math.max(w.y, Math.min(p.y + p.h / 2, w.y + w.h));
+    const dx = (p.x + p.w / 2) - cx;
+    const dy = (p.y + p.h / 2) - cy;
+    const d = Math.sqrt(dx * dx + dy * dy);
+    if (d > 0 && d < wallRange) {
+      const f = (wallRange - d) / wallRange;
+      avoidX += (dx / d) * f * 3.5;
+      avoidY += (dy / d) * f * 3.5;
+    }
+  }
+
+  // Repulsão suave de caixas (raio menor 30px, força 1.5 — permite interação)
+  for (const b of pushables) {
+    if (b.id === p.grabbedBox) continue;
+    const cx = Math.max(b.x, Math.min(p.x + p.w / 2, b.x + b.w));
+    const cy = Math.max(b.y, Math.min(p.y + p.h / 2, b.y + b.h));
+    const dx = (p.x + p.w / 2) - cx;
+    const dy = (p.y + p.h / 2) - cy;
+    const d = Math.sqrt(dx * dx + dy * dy);
+    if (d > 0 && d < 30) {
+      const f = (30 - d) / 30;
+      avoidX += (dx / d) * f * 1.5;
+      avoidY += (dy / d) * f * 1.5;
+    }
+  }
+
+  return { sepX, sepY, avoidX, avoidY };
+}
+
+// Encontra o melhor item/moeda para coletar, filtrando por tipo compatível
+function findBestCollectable(p, maxRange) {
+  let best = null, bestScore = -Infinity;
+  const pcx = p.x + PLAYER_SIZE / 2;
+  const pcy = p.y + PLAYER_SIZE / 2;
+  const hotTypes = ['speed', 'supernova', 'gravity', 'emp', 'tracker', 'magnetic'];
+  const runTypes = ['speed', 'machinegun', 'shield', 'invisibility', 'phaseshift', 'blink', 'repel'];
+
+  // Avaliar moedas (sempre coletáveis)
+  for (const c of coins) {
+    const d = Math.sqrt((c.x + 8 - pcx) ** 2 + (c.y + 8 - pcy) ** 2);
+    if (d < maxRange) {
+      const s = 100 - d * 0.2;
+      if (s > bestScore) { bestScore = s; best = { x: c.x + 8, y: c.y + 8 }; }
+    }
+  }
+
+  // Avaliar pickups (filtrado por tipo compatível e slots disponíveis)
+  for (const pk of pickups) {
+    if (p.isHot && !hotTypes.includes(pk.type)) continue;
+    if (!p.isHot && !runTypes.includes(pk.type)) continue;
+    if (!p.isHot && p.slotQ && p.slotE) continue; // Slots cheios
+
+    const d = Math.sqrt((pk.x + 10 - pcx) ** 2 + (pk.y + 10 - pcy) ** 2);
+    if (d < maxRange) {
+      let v = 150;
+      if (!p.isHot && (!p.slotQ || !p.slotE)) v += 80;
+      if (!p.isHot && ['shield', 'blink', 'phaseshift'].includes(pk.type)) v += 50;
+      if (p.isHot && ['speed', 'magnetic', 'gravity'].includes(pk.type)) v += 50;
+      const s = v - d * 0.15;
+      if (s > bestScore) { bestScore = s; best = { x: pk.x + 10, y: pk.y + 10 }; }
+    }
+  }
+
+  return best;
+}
+
+// Aplica direção ao input do bot com fusão de forças ambientais
+function applyDir(p, angle, env) {
+  const mx = Math.cos(angle) + (env ? env.sepX + env.avoidX : 0);
+  const my = Math.sin(angle) + (env ? env.sepY + env.avoidY : 0);
+  const finalAngle = Math.atan2(my, mx);
+  const dir = findSmartDir(p, finalAngle);
+
+  if (Math.abs(dir.vx) > 0.15) {
+    p.input.left = dir.vx < 0;
+    p.input.right = dir.vx > 0;
+  }
+  if (Math.abs(dir.vy) > 0.15) {
+    p.input.up = dir.vy < 0;
+    p.input.down = dir.vy > 0;
+  }
+  p.ai.lastMoveAngle = finalAngle;
+}
+
+// Compras inteligentes na Cyber-Loja com cooldown e prioridade por personalidade
+function tryBotBuy(p) {
+  const ai = p.ai;
+  if (ai.buyCooldown > 0) { ai.buyCooldown--; return; }
+  const mc = p.coins || 0;
+  if (mc < 3) return;
+
+  if (p.isHot) {
+    // Hot prioriza: magnetic > gravity > speed > tracker > supernova > emp
+    const items = [
+      { id: 'magnetic', price: 4 }, { id: 'gravity', price: 4 },
+      { id: 'speed', price: 3 }, { id: 'tracker', price: 3 },
+      { id: 'emp', price: 5 }, { id: 'supernova', price: 4 }
+    ];
+    const affordable = items.filter(i => mc >= i.price);
+    if (affordable.length > 0) {
+      const item = affordable[Math.floor(Math.random() * Math.min(2, affordable.length))];
+      p.coins -= item.price;
+      if (item.id === 'speed') p.speedBoostTimer = 15 * TICK_RATE;
+      else if (item.id === 'tracker') p.trackerTimer = 10 * TICK_RATE;
+      else if (item.id === 'gravity') p.gravityTimer = 12 * TICK_RATE;
+      else if (item.id === 'magnetic') p.magnetTimer = 8 * TICK_RATE;
+      else if (item.id === 'supernova') p.supernovaTimer = 10 * TICK_RATE;
+      else if (item.id === 'emp') p.empTimer = 10 * TICK_RATE;
+      broadcast({ type: 'itemBought', playerId: p.id, itemId: item.id, coins: p.coins });
+      ai.buyCooldown = 2 * TICK_RATE;
+    }
+  } else {
+    if (p.slotQ && p.slotE) return; // Slots cheios
+    // Runner prioriza baseado na personalidade
+    let items = [
+      { id: 'shield', price: 4 }, { id: 'blink', price: 3 },
+      { id: 'repel', price: 4 }, { id: 'speed', price: 3 },
+      { id: 'phaseshift', price: 5 }, { id: 'invisibility', price: 5 },
+      { id: 'machinegun', price: 4 }
+    ];
+    if (ai.personality === 'aggressive') items.unshift({ id: 'machinegun', price: 4 });
+    else if (ai.personality === 'defensive') items.unshift({ id: 'shield', price: 4 });
+
+    const affordable = items.filter(i => mc >= i.price);
+    if (affordable.length > 0) {
+      const item = affordable[0];
+      p.coins -= item.price;
+      if (!p.slotQ) p.slotQ = item.id;
+      else p.slotE = item.id;
+      broadcast({ type: 'itemBought', playerId: p.id, itemId: item.id, coins: p.coins });
+      ai.buyCooldown = 2 * TICK_RATE;
+    }
+  }
+}
+
+// Ativação tática de poderes especiais (Q/E) baseada em proximidade do perigo
+function tryActivatePowers(p, hot, dist) {
+  const activate = (slot, key) => {
+    if (!key) return false;
+    let should = false;
+
+    if (key === 'blink' && dist < 150) should = true;
+    else if (key === 'phaseshift' && dist < 180) should = true;
+    else if (key === 'shield' && dist < 200) should = true;
+    else if (key === 'repel' && dist < 130) should = true;
+    else if (key === 'speed' && dist < 300 && p.stamina < 200) should = true;
+    else if (key === 'invisibility' && dist < 300) should = true;
+    else if (key === 'machinegun' && dist < 450) should = true;
+
+    if (!should) return false;
+    if (slot === 'Q') p.slotQ = null;
+    else p.slotE = null;
+
+    if (key === 'phaseshift') {
+      p.phaseshiftTimer = 4 * TICK_RATE;
+      broadcast({ type: 'powerActivated', playerId: p.id, powerType: 'phaseshift' });
+    } else if (key === 'blink') {
+      const bx = p.x - hot.x, by = p.y - hot.y;
+      const bl = Math.sqrt(bx * bx + by * by);
+      if (bl > 0) {
+        const ux = bx / bl, uy = by / bl;
+        for (let d = 160; d >= 0; d -= 8) {
+          const tx = Math.max(TILE, Math.min(MAP_W - TILE - p.w, p.x + ux * d));
+          const ty = Math.max(TILE, Math.min(MAP_H - TILE - p.h, p.y + uy * d));
+          if (!collidesWithWalls(tx, ty, p.w, p.h) && !collidesWithBoxes(tx, ty, p.w, p.h, -1)) {
+            p.x = tx; p.y = ty;
+            broadcast({ type: 'powerActivated', playerId: p.id, powerType: 'blink', x: p.x, y: p.y });
+            break;
+          }
+        }
+      }
+    } else if (key === 'speed') {
+      p.speedBoostTimer = 15 * TICK_RATE;
+      broadcast({ type: 'powerActivated', playerId: p.id, powerType: 'speed' });
+    } else if (key === 'machinegun') {
+      p.machinegunTimer = 15 * TICK_RATE;
+      broadcast({ type: 'powerActivated', playerId: p.id, powerType: 'machinegun' });
+    } else if (key === 'shield') {
+      p.shieldTimer = 20 * TICK_RATE;
+      broadcast({ type: 'powerActivated', playerId: p.id, powerType: 'shield' });
+    } else if (key === 'invisibility') {
+      p.invisibilityTimer = 12 * TICK_RATE;
+      broadcast({ type: 'powerActivated', playerId: p.id, powerType: 'invisibility' });
+    } else if (key === 'repel') {
+      p.repelTimer = 6 * TICK_RATE;
+      broadcast({ type: 'powerActivated', playerId: p.id, powerType: 'repel' });
+    }
+    return true;
+  };
+
+  // Tenta Q primeiro, depois E
+  if (p.slotQ && !activate('Q', p.slotQ) && p.slotE) activate('E', p.slotE);
+  else if (!p.slotQ && p.slotE) activate('E', p.slotE);
+}
+
+// ══════════════════════════════════════════════════════════════
+// ══ ENTRADA PRINCIPAL DA IA ══
+// ══════════════════════════════════════════════════════════════
+function updateBotAI(p) {
+  p.input.up = false;
+  p.input.down = false;
+  p.input.left = false;
+  p.input.right = false;
+  p.input.shift = false;
+  if (p.isStunned) return;
+
+  ensureBotAI(p);
+  const ai = p.ai;
+
+  // Atualiza timers do bot
+  ai.shootCooldown = Math.max(0, ai.shootCooldown - 1);
+  ai.unstuckTimer = Math.max(0, ai.unstuckTimer - 1);
+  if (--ai.strafeSwitchTimer <= 0) {
+    ai.strafeDir *= -1;
+    ai.strafeSwitchTimer = Math.floor(Math.random() * 150) + 80;
+  }
+  if (--ai.fleeAngleTimer <= 0) {
+    ai.fleeAngleBias = (Math.random() - 0.5) * Math.PI / 2.5;
+    ai.fleeAngleTimer = Math.floor(Math.random() * 200) + 100;
+  }
+
+  // Detecção de travamento: ativa comportamento de desvencilhar
+  const stuck = checkBotStuck(p);
+  if (stuck && ai.stuckTicks > 2) {
+    if (ai.unstuckTimer <= 0) {
+      ai.unstuckTimer = Math.floor(0.75 * TICK_RATE); // 45 ticks = 0.75s
+      ai.unstuckAngle = Math.random() * Math.PI * 2;
+    }
+    ai.wanderTarget = null;
+    ai.wanderTimer = 0;
+    if (ai.stuckTicks > 4 && p.grabbedBox) {
+      const box = pushables.find(b => b.id === p.grabbedBox);
+      if (box) box.grabbedBy = null;
+      p.grabbedBox = null;
+      p.mouseWorld = null;
+    }
+  }
+
+  // Calcula forças ambientais
+  const env = calcEnvForces(p);
+
+  // Tenta comprar na loja
+  tryBotBuy(p);
+
+  // Despacha para a IA específica do papel
+  if (p.isHot) hotBotAI(p, env);
+  else runnerBotAI(p, env);
+
+  // Sincroniza mouseWorld APÓS decidir a direção (corrige bug de arrasto)
+  if (p.grabbedBox) {
+    let mx = 0, my = 0;
+    if (p.input.up) my = -1;
+    if (p.input.down) my = 1;
+    if (p.input.left) mx = -1;
+    if (p.input.right) mx = 1;
+    if (mx === 0 && my === 0) {
+      mx = Math.cos(ai.lastMoveAngle);
+      my = Math.sin(ai.lastMoveAngle);
+    }
+    const len = Math.sqrt(mx * mx + my * my) || 1;
+    p.mouseWorld = {
+      x: p.x + PLAYER_SIZE / 2 - (mx / len) * 50,
+      y: p.y + PLAYER_SIZE / 2 - (my / len) * 50
+    };
+  } else {
+    p.mouseWorld = null;
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// ══ IA DO CAÇADOR (HOT) — Predição, Flanqueio, Seleção de Alvo ══
+// ══════════════════════════════════════════════════════════════
+function hotBotAI(p, env) {
+  const ai = p.ai;
+
+  // Se estiver se desvencilhando de travamento, ignora IA normal e corre na direção livre
+  if (ai.unstuckTimer > 0) {
+    applyDir(p, ai.unstuckAngle, env);
+    p.input.shift = true;
+    return;
+  }
+
+  // Encontra todos os corredores visíveis (ignora invisíveis)
+  const runners = [];
+  for (const [, p2] of players) {
+    if (p2.isHot || p2.invisibilityTimer > 0) continue;
+    const dx = p2.x - p.x;
+    const dy = p2.y - p.y;
+    runners.push({ p: p2, dx, dy, dist: Math.sqrt(dx * dx + dy * dy) });
+  }
+  runners.sort((a, b) => a.dist - b.dist);
+
+  // Se não há corredores visíveis, explora o mapa buscando itens
+  if (!runners.length) {
+    smartWander(p, env, 600);
+    return;
+  }
+
+  // ── Seleção de Alvo Inteligente ──
+  // Pontua cada corredor: mais perto + isolado + debuffado = melhor alvo
+  let target = runners[0];
+  if (runners.length > 1) {
+    let bestScore = -Infinity;
+    for (const r of runners) {
+      let allies = 0;
+      for (const r2 of runners) {
+        if (r2 === r) continue;
+        if (Math.sqrt((r2.p.x - r.p.x) ** 2 + (r2.p.y - r.p.y) ** 2) < 200) allies++;
+      }
+      let score = 1000 - r.dist - allies * 180;
+      if (r.p.stamina < 100) score += 120;      // Sem stamina = fácil de pegar
+      if (r.p.speedDebuffTimer > 0) score += 180; // Lento por tiro
+      if (r.p.shieldTimer > 0) score -= 200;     // Escudo ativo = evitar
+      if (r.p.repelTimer > 0) score -= 300;      // Repulsão ativa = nem tentar
+      if (r.p.phaseshiftTimer > 0) score -= 150; // Atravessa paredes = difícil
+      if (score > bestScore) { bestScore = score; target = r; }
+    }
+  }
+
+  // ── Predição de Movimento do Alvo ──
+  let tx = target.p.x, ty = target.p.y;
+  if (target.p.input) {
+    let px = 0, py = 0;
+    if (target.p.input.up) py -= 1;
+    if (target.p.input.down) py += 1;
+    if (target.p.input.left) px -= 1;
+    if (target.p.input.right) px += 1;
+    const pLen = Math.sqrt(px * px + py * py) || 1;
+    const predFrames = Math.min(20, target.dist / (HOT_SPEED * 2));
+    tx += (px / pLen) * RUNNER_SPEED * predFrames * 0.7;
+    ty += (py / pLen) * RUNNER_SPEED * predFrames * 0.7;
+  }
+
+  // ── Flanqueio: adiciona ângulo de desvio quando longe ──
+  let chaseAngle = Math.atan2(ty - p.y, tx - p.x);
+  if (target.dist > 350) chaseAngle += ai.strafeDir * 0.2;
+
+  applyDir(p, chaseAngle, env);
+
+  // Sprint: quando perto e com stamina disponível
+  if (target.dist < 400 && p.stamina > 60) p.input.shift = true;
+  else if (target.dist < 200) p.input.shift = true;
+
+  // Hot não segura caixas (libera se pegou por acidente)
+  if (p.grabbedBox) {
+    const box = pushables.find(b => b.id === p.grabbedBox);
+    if (box) box.grabbedBy = null;
+    p.grabbedBox = null;
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// ══ IA DO CORREDOR (RUNNER) — Fuga, Sabotagem, Barricada, Coleta ══
+// ══════════════════════════════════════════════════════════════
+function runnerBotAI(p, env) {
+  const ai = p.ai;
+
+  // Se estiver se desvencilhando de travamento, ignora IA normal e corre na direção livre
+  if (ai.unstuckTimer > 0) {
+    applyDir(p, ai.unstuckAngle, env);
+    p.input.shift = true;
+    return;
+  }
+
+  // Encontra o Hot mais próximo (não stunado)
+  let nearHot = null, hotDist = Infinity;
+  for (const [, p2] of players) {
+    if (!p2.isHot || p2.isStunned) continue;
+    const d = Math.sqrt((p2.x - p.x) ** 2 + (p2.y - p.y) ** 2);
+    if (d < hotDist) { hotDist = d; nearHot = p2; }
+  }
+
+  // Níveis de ameaça
+  const critical = nearHot && hotDist < 180;
+  const danger = nearHot && hotDist < 350;
+  const safe = !nearHot || hotDist > 500;
+
+  // ── Ativação de Poderes ──
+  if (nearHot) tryActivatePowers(p, nearHot, hotDist);
+
+  // ── Tiro Tático ──
+  if (ai.shootCooldown <= 0 && p.ammo > 0 && p.reloadTimer <= 0) {
+    // Atira no Hot quando ao alcance (chance maior quando mais perto)
+    if (nearHot && hotDist < 550) {
+      const shootChance = hotDist < 200 ? 0.16 : (hotDist < 350 ? 0.10 : 0.05);
+      if (Math.random() < shootChance) {
+        const aimNoise = (Math.random() - 0.5) * 16;
+        triggerBotShoot(p, nearHot.x + PLAYER_SIZE / 2 + aimNoise, nearHot.y + PLAYER_SIZE / 2 + aimNoise);
+        ai.shootCooldown = 12 + Math.floor(Math.random() * 18);
+      }
+    }
+    // Sabotagem: atira em outros corredores para deixá-los lentos (isca para o Hot)
+    if (danger && p.ammo > 1 && Math.random() < 0.03) {
+      for (const [, p2] of players) {
+        if (p2.id === p.id || p2.isHot) continue;
+        const d = Math.sqrt((p2.x - p.x) ** 2 + (p2.y - p.y) ** 2);
+        if (d < 250 && nearHot) {
+          const p2ToHot = Math.sqrt((p2.x - nearHot.x) ** 2 + (p2.y - nearHot.y) ** 2);
+          if (p2ToHot > hotDist) { // Só sabota quem está MAIS LONGE do Hot que nós
+            triggerBotShoot(p, p2.x + PLAYER_SIZE / 2, p2.y + PLAYER_SIZE / 2);
+            ai.shootCooldown = 40;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  // ── Recarga Inteligente: recarrega manualmente quando seguro (2.5s vs 5s) ──
+  if (safe && p.ammo < 3 && p.reloadTimer <= 0) {
+    p.reloadTimer = Math.floor(2.5 * TICK_RATE);
+    p.ammo = 0;
+  }
+
+  // ── Barricada de Caixas, Bloqueio de Portas e Sabotagem de Aliados v10.3 ──
+  if (ai.boxCooldown > 0) ai.boxCooldown--;
+
+  if (!p.grabbedBox && p.holdEnergy > 150 && ai.boxCooldown <= 0) {
+    // Decide agarrar se estiver em perigo imediato OU chance aleatória se seguro para barricar preventivamente
+    const wantToGrab = danger || (safe && Math.random() < 0.005);
+    if (wantToGrab) {
+      // Encontra a caixa livre mais próxima em um raio estendido de 90px
+      let closestBox = null;
+      let closestDist = Infinity;
+      for (const box of pushables) {
+        if (box.grabbedBy) continue;
+        const d = Math.sqrt(
+          (p.x + p.w / 2 - box.x - box.w / 2) ** 2 +
+          (p.y + p.h / 2 - box.y - box.h / 2) ** 2
+        );
+        if (d <= 90 && d < closestDist) {
+          closestDist = d;
+          closestBox = box;
+        }
+      }
+      if (closestBox) {
+        p.grabbedBox = closestBox.id;
+        closestBox.grabbedBy = p.id;
+        ai.boxCooldown = 4 * TICK_RATE; // Cooldown para evitar agarrar freneticamente
+      }
+    }
+  }
+
+  // Solta a caixa taticamente: quando energia baixa, perigo crítico, seguro, ou para bloquear passagens/sabotar
+  if (p.grabbedBox) {
+    const box = pushables.find(b => b.id === p.grabbedBox);
+    let shouldRelease = false;
+    let releaseReason = "";
+
+    if (p.holdEnergy < 50) {
+      shouldRelease = true;
+      releaseReason = "energy";
+    } else if (critical) {
+      shouldRelease = true;
+      releaseReason = "critical";
+    }
+
+    // 1. Bloquear passagens estreitas (portas e corredores)
+    if (!shouldRelease && isInNarrowPassage(p.x, p.y, p.w, p.h)) {
+      shouldRelease = true;
+      releaseReason = "block";
+    }
+
+    // 2. Sabotagem: solta a caixa para atrapalhar um aliado próximo
+    if (!shouldRelease && danger) {
+      for (const [, p2] of players) {
+        if (p2.id === p.id || p2.isHot) continue;
+        const distToAlly = Math.sqrt((p2.x - p.x) ** 2 + (p2.y - p.y) ** 2);
+        if (distToAlly < 110) {
+          // Verifica se o aliado está atrás de nós (próximo à caixa)
+          if (box) {
+            const distAllyToBox = Math.sqrt(
+              (p2.x + p2.w / 2 - box.x - box.w / 2) ** 2 +
+              (p2.y + p2.h / 2 - box.y - box.h / 2) ** 2
+            );
+            if (distAllyToBox < 80) {
+              shouldRelease = true;
+              releaseReason = "sabotage";
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    // 3. Queda aleatória se seguro
+    if (!shouldRelease && !danger && Math.random() < 0.008) {
+      shouldRelease = true;
+      releaseReason = "safe_drop";
+    }
+
+    if (shouldRelease) {
+      if (box) box.grabbedBy = null;
+      p.grabbedBox = null;
+      ai.boxCooldown = 3 * TICK_RATE;
+
+      // Mensagens de chat divertidas e neon-imersivas
+      if (releaseReason === "block") {
+        if (Math.random() < 0.20) {
+          const msgs = ["Passagem fechada!", "Barricando a porta!", "Fica aí, caçador!", "Caminho bloqueado!"];
+          broadcast({ type: 'chat', playerId: p.id, name: p.name, color: p.color, text: msgs[Math.floor(Math.random() * msgs.length)] });
+        }
+      } else if (releaseReason === "sabotage") {
+        if (Math.random() < 0.35) {
+          const msgs = ["Desculpa, amigo! Cada um por si!", "Opa, deixei cair!", "O caçador prefere você!", "Foi mal, bloqueado!"];
+          broadcast({ type: 'chat', playerId: p.id, name: p.name, color: p.color, text: msgs[Math.floor(Math.random() * msgs.length)] });
+        }
+      }
+    }
+  }
+
+  // ══ DECISÃO DE MOVIMENTO ══
+  if (critical) {
+    // ── CRÍTICO: fuga com zigzag e possível tática de isca ──
+    const fleeAngle = Math.atan2(-(nearHot.y - p.y), -(nearHot.x - p.x));
+    let useDecoy = false;
+
+    // Tática de isca: corre em direção a outro corredor para dividir atenção do Hot
+    const decoyChance = ai.personality === 'saboteur' ? 0.06 : 0.015;
+    if (Math.random() < decoyChance) {
+      for (const [, p2] of players) {
+        if (p2.id === p.id || p2.isHot) continue;
+        const d = Math.sqrt((p2.x - p.x) ** 2 + (p2.y - p.y) ** 2);
+        if (d < 300 && d > 60) {
+          const p2ToHot = Math.sqrt((p2.x - nearHot.x) ** 2 + (p2.y - nearHot.y) ** 2);
+          if (p2ToHot > hotDist + 80) {
+            const decoyAngle = Math.atan2(p2.y - p.y, p2.x - p.x);
+            if (Math.abs(normalizeAngle(decoyAngle - fleeAngle)) < Math.PI / 2) {
+              applyDir(p, decoyAngle, env);
+              useDecoy = true;
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    if (!useDecoy) {
+      applyDir(p, fleeAngle + ai.fleeAngleBias + ai.strafeDir * 0.3, env);
+    }
+    p.input.shift = p.stamina > 20; // Sprint mesmo com pouca stamina em emergência
+
+  } else if (danger) {
+    // ── PERIGO: foge mas coleta itens se estiverem no caminho da fuga ──
+    const fleeAngle = Math.atan2(-(nearHot.y - p.y), -(nearHot.x - p.x));
+    const collectable = findBestCollectable(p, 150);
+
+    if (collectable) {
+      const collectAngle = Math.atan2(
+        collectable.y - p.y - PLAYER_SIZE / 2,
+        collectable.x - p.x - PLAYER_SIZE / 2
+      );
+      // Só coleta se o item está na direção da fuga (ângulo < 90°)
+      if (Math.abs(normalizeAngle(collectAngle - fleeAngle)) < Math.PI / 2) {
+        applyDir(p, collectAngle, env);
+      } else {
+        applyDir(p, fleeAngle + ai.fleeAngleBias, env);
+      }
+    } else {
+      applyDir(p, fleeAngle + ai.fleeAngleBias, env);
+    }
+    if (p.stamina > 100) p.input.shift = true;
+
+  } else if (safe) {
+    // ── SEGURO: coleta proativa de itens e moedas (raio expandido 600px) ──
+    const collectable = findBestCollectable(p, 600);
+    if (collectable) {
+      applyDir(p, Math.atan2(
+        collectable.y - p.y - PLAYER_SIZE / 2,
+        collectable.x - p.x - PLAYER_SIZE / 2
+      ), env);
+    } else {
+      smartWander(p, env, 500);
+    }
+
+  } else {
+    // ── MODERADO: balanço entre fuga e coleta ──
+    const collectable = findBestCollectable(p, 350);
+    if (collectable && nearHot) {
+      const collectAngle = Math.atan2(
+        collectable.y - p.y - PLAYER_SIZE / 2,
+        collectable.x - p.x - PLAYER_SIZE / 2
+      );
+      const fleeAngle = Math.atan2(-(nearHot.y - p.y), -(nearHot.x - p.x));
+      // Mistura 60% fuga + 40% coleta
+      const blendAngle = Math.atan2(
+        Math.sin(fleeAngle) * 0.6 + Math.sin(collectAngle) * 0.4,
+        Math.cos(fleeAngle) * 0.6 + Math.cos(collectAngle) * 0.4
+      );
+      applyDir(p, blendAngle, env);
+    } else if (nearHot) {
+      applyDir(p, Math.atan2(-(nearHot.y - p.y), -(nearHot.x - p.x)) + ai.fleeAngleBias, env);
+    } else {
+      smartWander(p, env, 500);
+    }
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// ══ EXPLORAÇÃO INTELIGENTE — Busca itens, moedas, waypoints livres ══
+// ══════════════════════════════════════════════════════════════
+function smartWander(p, env, radius) {
+  const ai = p.ai;
+
+  // Primeiro tenta achar algo para coletar no raio
+  const collectable = findBestCollectable(p, radius);
+  if (collectable) {
+    applyDir(p, Math.atan2(
+      collectable.y - p.y - PLAYER_SIZE / 2,
+      collectable.x - p.x - PLAYER_SIZE / 2
+    ), env);
+    return;
+  }
+
+  // Se não há coletáveis, navega até um ponto aleatório na arena
+  if (!ai.wanderTarget || ai.wanderTimer <= 0) {
+    const hx = 3 * TILE + TILE;
+    const hy = 3 * TILE + TILE;
+    const hw = 60 * TILE;
+    const hh = 42 * TILE;
+
+    // Tenta encontrar um ponto livre (sem paredes)
+    for (let i = 0; i < 15; i++) {
+      const rx = hx + Math.random() * hw;
+      const ry = hy + Math.random() * hh;
+      if (!collidesWithWalls(rx, ry, PLAYER_SIZE, PLAYER_SIZE)) {
+        ai.wanderTarget = { x: rx, y: ry };
+        break;
+      }
+    }
+    if (!ai.wanderTarget) {
+      ai.wanderTarget = {
+        x: TILE + Math.random() * (MAP_W - 2 * TILE),
+        y: TILE + Math.random() * (MAP_H - 2 * TILE)
+      };
+    }
+    ai.wanderTimer = Math.floor((3 + Math.random() * 5) * TICK_RATE);
+  } else {
+    ai.wanderTimer--;
+  }
+
+  if (ai.wanderTarget) {
+    const dx = ai.wanderTarget.x - (p.x + PLAYER_SIZE / 2);
+    const dy = ai.wanderTarget.y - (p.y + PLAYER_SIZE / 2);
+    if (Math.sqrt(dx * dx + dy * dy) < 30) {
+      // Chegou no alvo, escolhe novo
+      ai.wanderTarget = null;
+      ai.wanderTimer = 0;
+    } else {
+      applyDir(p, Math.atan2(dy, dx), env);
+    }
+  }
+}
 // ─── Loop Principal da Física (60 FPS) ───
 function gameTick() {
   tickCount++;
@@ -1078,6 +1982,10 @@ function gameTick() {
 
   // 3. Atualização individual de cada jogador
   for (const [, p] of players) {
+    if (p.isBot) {
+      updateBotAI(p);
+    }
+
     // 1. Recarga da arma (5 segundos)
     if (p.reloadTimer > 0) {
       p.reloadTimer--;
@@ -1092,6 +2000,7 @@ function gameTick() {
       if (p.stunTimer <= 0) {
         p.isStunned = false;
         p.health = 100; // Recupera totalmente o sangue
+        p.reviveImmunityTimer = 3 * TICK_RATE; // 3 segundos de imunidade infinita ao reviver!
       }
     }
 
@@ -1131,6 +2040,7 @@ function gameTick() {
     if (p.phaseshiftTimer > 0) p.phaseshiftTimer--;
     if (p.magnetTimer > 0) p.magnetTimer--;
     if (p.repelTimer > 0) p.repelTimer--;
+    if (p.reviveImmunityTimer > 0) p.reviveImmunityTimer--;
 
     // Canhão Overdrive: munição infinita e sem recarga
     if (p.overdriveTimer > 0) {
@@ -1364,13 +2274,43 @@ function gameTick() {
     // Mover X
     const hasPhaseShift = p.phaseshiftTimer > 0;
     let nx = p.x + dx * speed + fx;
-    if (hasPhaseShift || (!collidesWithWalls(nx, p.y, p.w, p.h) && !collidesWithBoxes(nx, p.y, p.w, p.h, -1))) {
+    if (hasPhaseShift || !collidesWithWalls(nx, p.y, p.w, p.h)) {
       p.x = nx;
     }
     // Mover Y
     let ny = p.y + dy * speed + fy;
-    if (hasPhaseShift || (!collidesWithWalls(p.x, ny, p.w, p.h) && !collidesWithBoxes(p.x, ny, p.w, p.h, -1))) {
+    if (hasPhaseShift || !collidesWithWalls(p.x, ny, p.w, p.h)) {
       p.y = ny;
+    }
+
+    // --- Resolução de Sobreposição Física com Caixas (Permite empurrão por corpo e evita travamento) ---
+    if (!p.isStunned && !hasPhaseShift) {
+      for (const box of pushables) {
+        if (p.x + p.w > box.x && p.x < box.x + box.w && p.y + p.h > box.y && p.y < box.y + box.h) {
+          const overlapX = Math.min(p.x + p.w - box.x, box.x + box.w - p.x);
+          const overlapY = Math.min(p.y + p.h - box.y, box.y + box.h - p.y);
+
+          if (overlapX < overlapY) {
+            const pushDir = (box.x + box.w / 2 > p.x + p.w / 2) ? 1 : -1;
+            const newBoxX = box.x + pushDir * overlapX;
+            if (!collidesWithWalls(newBoxX + 1, box.y + 1, box.w - 2, box.h - 2) &&
+                !collidesWithBoxes(newBoxX + 1, box.y + 1, box.w - 2, box.h - 2, box.id)) {
+              box.x = newBoxX;
+            } else {
+              p.x -= pushDir * overlapX;
+            }
+          } else {
+            const pushDir = (box.y + box.h / 2 > p.y + p.h / 2) ? 1 : -1;
+            const newBoxY = box.y + pushDir * overlapY;
+            if (!collidesWithWalls(box.x + 1, newBoxY + 1, box.w - 2, box.h - 2) &&
+                !collidesWithBoxes(box.x + 1, newBoxY + 1, box.w - 2, box.h - 2, box.id)) {
+              box.y = newBoxY;
+            } else {
+              p.y -= pushDir * overlapY;
+            }
+          }
+        }
+      }
     }
     
     // Clamps
@@ -1415,7 +2355,7 @@ function gameTick() {
         const bdx = (p.x + PLAYER_SIZE / 2) - (box.x + box.w / 2);
         const bdy = (p.y + PLAYER_SIZE / 2) - (box.y + box.h / 2);
         const bdist = Math.sqrt(bdx * bdx + bdy * bdy);
-        if (bdist > 0 && bdist <= 240) {
+        if (bdist > 35 && bdist <= 240) {
           const pullStrength = 3.2 * (1 - bdist / 240); // Força diminui com a distância
           bfx += (bdx / bdist) * pullStrength;
           bfy += (bdy / bdist) * pullStrength;

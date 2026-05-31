@@ -47,6 +47,13 @@ const shopPanel = document.getElementById('shopPanel');
 const shopCoins = document.getElementById('shopCoins');
 const shopItems = document.getElementById('shopItems');
 
+// BOTS MODAL (v9)
+const botsModal = document.getElementById('botsModal');
+const confirmBotsBtn = document.getElementById('confirmBotsBtn');
+const closeBotsBtn = document.getElementById('closeBotsBtn');
+const botsNumBtns = document.querySelectorAll('.bots-num-btn');
+let selectedBotCount = 0;
+
 // ── Estado ──
 let ws = null, myId = null, gameMap = null;
 let players = new Map();
@@ -283,6 +290,57 @@ joinBtn.addEventListener('click', () => {
   }
 });
 
+// Helper para configurar e abrir o modal de bots com o estado atual pré-selecionado
+function openBotsConfigurationModal() {
+  if (!botsModal) return;
+  botsModal.classList.remove('hidden');
+  const currentBotCount = [...players.values()].filter(p => p.isBot).length;
+  botsNumBtns.forEach(btn => {
+    if (parseInt(btn.dataset.num) === currentBotCount) {
+      btn.classList.add('selected');
+    } else {
+      btn.classList.remove('selected');
+    }
+  });
+  confirmBotsBtn.disabled = false;
+  selectedBotCount = currentBotCount;
+}
+
+// ── Bots Modal Listeners ──
+if (botsNumBtns && confirmBotsBtn && closeBotsBtn && botsModal) {
+  botsNumBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      botsNumBtns.forEach(b => b.classList.remove('selected'));
+      btn.classList.add('selected');
+      selectedBotCount = parseInt(btn.dataset.num);
+      confirmBotsBtn.disabled = false;
+    });
+  });
+
+  confirmBotsBtn.addEventListener('click', () => {
+    if (selectedBotCount >= 0 && selectedBotCount <= 8) {
+      if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'addBots', count: selectedBotCount }));
+      }
+      botsModal.classList.add('hidden');
+    }
+  });
+
+  closeBotsBtn.addEventListener('click', () => {
+    botsModal.classList.add('hidden');
+  });
+
+  const openBotsBtn = document.getElementById('openBotsBtn');
+  if (openBotsBtn) {
+    openBotsBtn.addEventListener('click', () => {
+      const humans = [...players.values()].filter(p => !p.isBot);
+      if (joined && humans.length === 1) {
+        openBotsConfigurationModal();
+      }
+    });
+  }
+}
+
 // ── Roster Collapse/Expand ──
 togglePlayerListBtn.addEventListener('click', () => {
   isRosterCollapsed = !isRosterCollapsed;
@@ -314,6 +372,34 @@ window.addEventListener('keydown', e => {
 
   // Ignora movimento se estiver digitando em inputs
   if (document.activeElement === nameInput || document.activeElement === chatInput) return;
+
+  // Tecla B para abrir o modal de bots
+  if (e.key === 'b' || e.key === 'B') {
+    const humans = [...players.values()].filter(p => !p.isBot);
+    if (joined && humans.length === 1) {
+      openBotsConfigurationModal();
+    }
+    e.preventDefault();
+    return;
+  }
+
+  // Atalhos de compra rápida da Cyber-Loja (teclas 1 a 9)
+  if (e.key >= '1' && e.key <= '9') {
+    const me = players.get(myId);
+    if (me && joined && ws && ws.readyState === 1) {
+      const shopItemsContainer = document.getElementById('shopItems');
+      if (shopItemsContainer) {
+        const index = parseInt(e.key) - 1;
+        const itemDiv = shopItemsContainer.children[index];
+        if (itemDiv && !itemDiv.classList.contains('disabled')) {
+          const itemId = itemDiv.dataset.id;
+          ws.send(JSON.stringify({ type: 'buyItem', itemId }));
+        }
+      }
+    }
+    e.preventDefault();
+    return;
+  }
 
   // Recarga manual rápida com a tecla R
   if (e.key === 'r' || e.key === 'R') {
@@ -680,6 +766,10 @@ function handleMessage(msg) {
       }
       break;
 
+    case 'offerBots':
+      openBotsConfigurationModal();
+      break;
+
     case 'gameOver':
       showEndScreen(msg.winner);
       break;
@@ -818,13 +908,13 @@ function updateWeaponHud() {
       slotQEl.parentElement.parentElement.classList.remove('hidden');
       
       const powerLabels = {
-        phaseshift: { name: 'PHASE SHIFT', desc: 'Atravessar Paredes' },
-        blink: { name: 'SHORT BLINK', desc: 'Teleporte Curto' },
-        speed: { name: 'SPEED BOOST', desc: 'Super Velocidade' },
-        machinegun: { name: 'BURST LASER', desc: 'Rajada de Tiros' },
-        shield: { name: 'PLASMA SHIELD', desc: 'Escudo Protetor' },
-        invisibility: { name: 'CHAMELEON', desc: 'Invisibilidade' },
-        repel: { name: 'PULSO REPULSOR', desc: 'Repele Hots ao Redor' }
+        phaseshift: { name: 'PHASE', desc: 'Passa paredes' },
+        blink: { name: 'BLINK', desc: 'Teleporte' },
+        speed: { name: 'SPEED', desc: 'Velocidade' },
+        machinegun: { name: 'BURST', desc: 'Rajada' },
+        shield: { name: 'SHIELD', desc: 'Escudo' },
+        invisibility: { name: 'CLOAK', desc: 'Invisível' },
+        repel: { name: 'REPEL', desc: 'Repulsor' }
       };
 
       const updateSlot = (el, powerKey) => {
@@ -835,8 +925,8 @@ function updateWeaponHud() {
           el.querySelector('.inventory-slot-label').textContent = cfg.name;
           el.querySelector('.inventory-slot-desc').textContent = cfg.desc;
         } else {
-          el.querySelector('.inventory-slot-label').textContent = '— VAZIO —';
-          el.querySelector('.inventory-slot-desc').textContent = 'Sem item';
+          el.querySelector('.inventory-slot-label').textContent = 'VAZIO';
+          el.querySelector('.inventory-slot-desc').textContent = 'Vazio';
         }
       };
       
@@ -886,6 +976,7 @@ function updateShopUI() {
 
     const items = me.isHot ? hotItems : runnerItems;
 
+    let itemIdx = 1;
     for (const item of items) {
       const row = document.createElement('div');
       row.className = 'shop-item';
@@ -897,7 +988,13 @@ function updateShopUI() {
 
       const name = document.createElement('span');
       name.className = 'shop-item-name';
-      name.textContent = item.name;
+      
+      const badge = document.createElement('span');
+      badge.className = 'shop-item-badge';
+      badge.textContent = `[${itemIdx++}] `;
+      
+      name.appendChild(badge);
+      name.appendChild(document.createTextNode(item.name));
 
       const desc = document.createElement('span');
       desc.className = 'shop-item-desc';
@@ -951,7 +1048,7 @@ function updatePlayerList() {
     const nameSpan = document.createElement('span');
     nameSpan.className = 'player-row-name';
     nameSpan.style.color = p.color;
-    nameSpan.textContent = p.name + (p.id === myId ? ' (Você)' : '');
+    nameSpan.textContent = (p.isBot ? '🤖 ' : '') + p.name + (p.id === myId ? ' (Você)' : '');
     top.appendChild(nameSpan);
 
     const statusSpan = document.createElement('span');
@@ -981,6 +1078,18 @@ function updatePlayerList() {
     }
 
     playerListContent.appendChild(row);
+  }
+
+  // Só exibe o rodapé de adicionar bots se houver exatamente 1 humano na sala
+  const humans = [...players.values()].filter(p => !p.isBot);
+  const openBotsBtn = document.getElementById('openBotsBtn');
+  if (openBotsBtn) {
+    const footer = openBotsBtn.parentElement;
+    if (humans.length === 1) {
+      footer.style.display = 'block';
+    } else {
+      footer.style.display = 'none';
+    }
   }
 }
 
