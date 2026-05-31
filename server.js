@@ -253,6 +253,8 @@ function startInGame() {
     hotPlayer.isHot = true;
     hotPlayer.speed = HOT_SPEED;
     hotPlayer.health = 100;
+    hotPlayer.machinegunTimer = 0;
+    hotPlayer.shieldTimer = 0;
   }
   broadcast({ type: 'phaseChange', phase: Phase.INGAME, timer: GAME_SECS, hotAlphaId: hotId });
 }
@@ -667,13 +669,11 @@ function gameTick() {
     }
   }
 
-  // 2. Spawning dinâmico de itens a cada 15 segundos nas fases ativas
-  if (gamePhase === Phase.WARMUP || gamePhase === Phase.INGAME) {
-    pickupSpawnTimer--;
-    if (pickupSpawnTimer <= 0) {
-      pickupSpawnTimer = PICKUP_SPAWN_INTERVAL;
-      spawnRandomPickup();
-    }
+  // 2. Spawning dinâmico de itens a cada 15 segundos em todas as fases (incluindo LOBBY para testes!)
+  pickupSpawnTimer--;
+  if (pickupSpawnTimer <= 0) {
+    pickupSpawnTimer = PICKUP_SPAWN_INTERVAL;
+    spawnRandomPickup();
   }
 
   // 3. Atualização individual de cada jogador
@@ -920,10 +920,12 @@ function gameTick() {
               hotName: hot.name
             });
           } else {
-            // Contamina normalmente
+            // Contamina normalmente e limpa buffs exclusivos de corredor
             runner.isHot = true;
             runner.speed = HOT_SPEED;
             runner.health = 100;
+            runner.machinegunTimer = 0;
+            runner.shieldTimer = 0;
             broadcast({
               type: 'infected',
               playerId: runner.id,
