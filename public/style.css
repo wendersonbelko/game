@@ -562,4 +562,18 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg-d
   box-shadow: 0 0 5px rgba(255,204,0,0.15);
 }
 
+/* ── TRANSPARÊNCIA DOS HUDS SOB JOGADORES (v9) ── */
+.volume-control,
+.shop-panel,
+.weapon-hud,
+.player-list-panel,
+.chat-area,
+#hudTop {
+  transition: opacity 0.25s ease-in-out, transform 0.2s, border-color 0.2s, background 0.2s, box-shadow 0.2s !important;
+}
+
+.behind-hud {
+  opacity: 0.20 !important;
+}
+
 

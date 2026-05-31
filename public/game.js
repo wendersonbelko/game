@@ -1654,12 +1654,72 @@ function drawMinimap() {
   ctx.strokeRect(mx + camX * sx, my + camY * sy, canvas.width * sx, canvas.height * sy);
 }
 
+// ── Atualização de Transparência dos HUDs sob Jogadores v9 ──
+function updateHudOpacity() {
+  if (!joined) return;
+
+  const huds = [
+    document.getElementById('volumeControl'),
+    document.getElementById('shopPanel'),
+    document.getElementById('weaponHud'),
+    document.getElementById('playerListPanel'),
+    document.getElementById('chatArea'),
+    document.getElementById('hudTop')
+  ];
+
+  for (const hud of huds) {
+    if (!hud) continue;
+    
+    // Se o elemento estiver oculto, não precisa processar
+    if (hud.classList.contains('hidden') || hud.style.display === 'none') {
+      hud.classList.remove('behind-hud');
+      continue;
+    }
+
+    const rect = hud.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) {
+      hud.classList.remove('behind-hud');
+      continue;
+    }
+
+    let overlap = false;
+    for (const [id, p] of players) {
+      // Posição do jogador na tela (tela de jogo)
+      const sz = 28;
+      const screenX = p.x - camX + shakeX;
+      const screenY = p.y - camY + shakeY;
+
+      // Caixa delimitadora do jogador na tela
+      const pLeft = screenX;
+      const pRight = screenX + sz;
+      const pTop = screenY;
+      const pBottom = screenY + sz;
+
+      // Verifica se a caixa delimitadora do jogador se sobrepõe ao retângulo do HUD
+      if (!(pRight < rect.left || 
+            pLeft > rect.right || 
+            pBottom < rect.top || 
+            pTop > rect.bottom)) {
+        overlap = true;
+        break; // encontrou um jogador atrás deste HUD, pode sair do loop
+      }
+    }
+
+    if (overlap) {
+      hud.classList.add('behind-hud');
+    } else {
+      hud.classList.remove('behind-hud');
+    }
+  }
+}
+
 // ── Game Loop ──
 function gameLoop() {
   sendInput();
   interpolatePlayers();
   updateCamera();
   updateParticles();
+  updateHudOpacity();
   render();
   requestAnimationFrame(gameLoop);
 }
