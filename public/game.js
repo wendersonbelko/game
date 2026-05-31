@@ -55,6 +55,26 @@ const targetPos = new Map();
 const keys = { up: false, down: false, left: false, right: false };
 let lastInputJson = '';
 
+// ── Áudio ──
+const sfx10s = new Audio('10s.mp3');
+sfx10s.volume = 0.25;
+let alert10sFired = false;
+
+const bgMusic = new Audio('background.mp3');
+bgMusic.loop = true;
+bgMusic.volume = 0.25;
+let bgMusicStarted = false;
+
+function startBgMusic() {
+  if (bgMusicStarted) return;
+  bgMusicStarted = true;
+  bgMusic.play().catch(() => {});
+}
+
+// Inicia a música no primeiro clique/tecla (política de autoplay dos navegadores)
+document.addEventListener('click', startBgMusic, { once: true });
+document.addEventListener('keydown', startBgMusic, { once: true });
+
 // Cores do personagem
 const defaultColors = ['#00f0ff','#00ff88','#aa66ff','#ff66cc','#ffcc00','#ff8844','#66ffcc','#88aaff'];
 let selectedColor = defaultColors[0];
@@ -267,6 +287,7 @@ function handleMessage(msg) {
       pushables = msg.map.pushables;
       phase = msg.phase;
       timer = msg.timer;
+      activePickups = msg.pickups || []; // Carrega pickups já presentes no mapa
       players.clear();
       targetPos.clear();
       for (const p of msg.players) {
@@ -280,7 +301,7 @@ function handleMessage(msg) {
       phase = msg.phase; timer = msg.timer;
       runnersCount = msg.runnersCount; hotsCount = msg.hotsCount;
       if (msg.pushables) pushables = msg.pushables;
-      if (msg.pickups) activePickups = msg.pickups; // Captura drops v6!
+      if (msg.pickups !== undefined) activePickups = msg.pickups; // Captura drops v6!
 
       const ids = new Set();
       for (const sp of msg.players) {
@@ -304,6 +325,10 @@ function handleMessage(msg) {
     case 'phaseChange':
       phase = msg.phase; timer = msg.timer || 0;
       if (msg.map) { gameMap = msg.map; pushables = msg.map.pushables; }
+      // Limpa pickups ao mudar para lobby/warmup
+      if (phase === 'lobby' || phase === 'warmup') activePickups = [];
+      // Reseta flag do alerta de 10s a cada nova partida
+      alert10sFired = false;
       endScreen.classList.add('hidden');
       hotSelectScreen.classList.add('hidden');
       if (phase === 'ingame' && msg.hotAlphaId) showHotSelect(msg.hotAlphaId);
@@ -448,6 +473,13 @@ function updateHUD() {
   hudTimer.className = (phase === 'ingame' && timer <= 20) ? 'urgent' : '';
   hudRunners.textContent = `🏃 ${runnersCount}`;
   hudHots.textContent = `🔥 ${hotsCount}`;
+
+  // Alerta sonoro dos 10 segundos finais da partida
+  if (phase === 'ingame' && timer <= 10 && timer > 0 && !alert10sFired) {
+    alert10sFired = true;
+    sfx10s.currentTime = 0;
+    sfx10s.play().catch(() => {}); // Silencia erros de autoplay
+  }
 }
 
 // ── Atualização do Weapon HUD (v5) ──

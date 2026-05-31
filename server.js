@@ -27,7 +27,7 @@ const MAP_H = 1520;
 const PLAYER_SIZE = 28;
 const RUNNER_SPEED = 3.0;
 const HOT_SPEED = 3.4;
-const WARMUP_SECS = 60; // 60 segundos de aquecimento antes da caçada
+const WARMUP_SECS = 20; // 20 segundos de aquecimento antes da caçada
 const GAME_SECS = 420; // 7 minutos de caçada
 const ENDGAME_SECS = 8;
 const MIN_PLAYERS_TO_START = 3;
@@ -240,12 +240,17 @@ function getMapData() {
 function startWarmup() {
   gamePhase = Phase.WARMUP;
   phaseTimer = WARMUP_SECS * TICK_RATE;
+  // Limpa pickups ao iniciar aquecimento
+  pickups = [];
   broadcast({ type: 'phaseChange', phase: Phase.WARMUP, timer: WARMUP_SECS });
 }
 
 function startInGame() {
   gamePhase = Phase.INGAME;
   phaseTimer = GAME_SECS * TICK_RATE;
+  // Reseta timer e spawna o primeiro item logo ao iniciar
+  pickupSpawnTimer = PICKUP_SPAWN_INTERVAL;
+  pickups = [];
   const ids = [...players.keys()];
   const hotId = ids[Math.floor(Math.random() * ids.length)];
   const hotPlayer = players.get(hotId);
@@ -257,6 +262,9 @@ function startInGame() {
     hotPlayer.shieldTimer = 0;
   }
   broadcast({ type: 'phaseChange', phase: Phase.INGAME, timer: GAME_SECS, hotAlphaId: hotId });
+  // Spawna o primeiro pickup imediatamente ao começar a partida
+  spawnRandomPickup();
+  spawnRandomPickup();
 }
 
 function endGame(win) {
@@ -544,6 +552,7 @@ wss.on('connection', (ws) => {
         phase: gamePhase,
         timer: Math.ceil(phaseTimer / TICK_RATE),
         colors: PLAYER_COLORS,
+        pickups: pickups.map(pk => ({ id: pk.id, x: pk.x, y: pk.y, type: pk.type })),
       }));
 
       broadcast({ type: 'playerJoined', player: serializePlayer(currentPlayer) });
@@ -669,11 +678,13 @@ function gameTick() {
     }
   }
 
-  // 2. Spawning dinâmico de itens a cada 15 segundos em todas as fases (incluindo LOBBY para testes!)
-  pickupSpawnTimer--;
-  if (pickupSpawnTimer <= 0) {
-    pickupSpawnTimer = PICKUP_SPAWN_INTERVAL;
-    spawnRandomPickup();
+  // 2. Spawning dinâmico de itens a cada 15 segundos — apenas durante a partida!
+  if (gamePhase === Phase.INGAME) {
+    pickupSpawnTimer--;
+    if (pickupSpawnTimer <= 0) {
+      pickupSpawnTimer = PICKUP_SPAWN_INTERVAL;
+      spawnRandomPickup();
+    }
   }
 
   // 3. Atualização individual de cada jogador
