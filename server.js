@@ -28,7 +28,7 @@ const PLAYER_SIZE = 28;
 const RUNNER_SPEED = 3.0;
 const HOT_SPEED = 3.3;
 const WARMUP_SECS = 20; // 20 segundos de aquecimento antes da caçada
-const GAME_SECS = 180;//3 minutos de caçada
+const GAME_SECS = 120;//2 minutos de caçada
 const ENDGAME_SECS = 8;
 const MIN_PLAYERS_TO_START = 3;
 const MAX_PLAYERS = 20;
@@ -50,6 +50,7 @@ let tickCount = 0;
 let winner = null;
 let currentRound = 1; // Onda atual do torneio (1 até 7)
 let nextPlayerId = 1;
+let introFreezeTimer = 0;
 
 // Itens Drops v6
 let pickups = [];
@@ -426,8 +427,18 @@ function startWarmup() {
 }
 
 function startInGame() {
+  // Libera todas as caixas arrastadas ao iniciar a caçada
+  for (const [, p] of players) {
+    p.grabbedBox = null;
+    p.mouseWorld = null;
+  }
+  for (const box of pushables) {
+    box.grabbedBy = null;
+  }
+
   gamePhase = Phase.INGAME;
   phaseTimer = GAME_SECS * TICK_RATE;
+  introFreezeTimer = Math.round(3.5 * TICK_RATE); // 3.5 segundos congelados no início
   // Reseta timer e spawna o primeiro item logo ao iniciar
   pickupSpawnTimer = PICKUP_SPAWN_INTERVAL;
   pickups = [];
@@ -487,6 +498,15 @@ function startInGame() {
 
 function endGame(win) {
   winner = win;
+
+  // Libera todas as caixas arrastadas ao finalizar a partida
+  for (const [, p] of players) {
+    p.grabbedBox = null;
+    p.mouseWorld = null;
+  }
+  for (const box of pushables) {
+    box.grabbedBy = null;
+  }
 
   // 1. Aplicar bônus finais de fim de rodada
   if (win === 'runners') {
@@ -653,8 +673,8 @@ function resetRound() {
     p.magnetTimer = 0;
     p.repelTimer = 0;
 
-    // Reset Economia v8
-    p.coins = 0;
+    // Reset Economia v8 - Removido para tornar as moedas acumulativas entre rodadas
+    // p.coins = 0;
   }
 
   broadcast({
@@ -739,7 +759,10 @@ function checkWinConditions() {
   if (gamePhase !== Phase.INGAME) return;
   const runners = [...players.values()].filter(p => !p.isHot);
   const hots = [...players.values()].filter(p => p.isHot);
-  if (hots.length === 0) return;
+  if (hots.length === 0) {
+    endGame('runners');
+    return;
+  }
   if (runners.length === 0) endGame('hots');
 }
 
@@ -1096,6 +1119,18 @@ wss.on('connection', (ws) => {
     }
 
     if (!currentPlayer) return;
+
+    const isFrozen = (gamePhase !== Phase.INGAME && gamePhase !== Phase.WARMUP) || (gamePhase === Phase.INGAME && introFreezeTimer > 0);
+    if (isFrozen) {
+      currentPlayer.input.up = false;
+      currentPlayer.input.down = false;
+      currentPlayer.input.left = false;
+      currentPlayer.input.right = false;
+      currentPlayer.input.shift = false;
+      if (['input', 'shoot', 'grab', 'drag', 'release', 'reload', 'activatePower', 'buyItem'].includes(msg.type)) {
+        return;
+      }
+    }
 
     if (msg.type === 'input') {
       currentPlayer.input.up = !!msg.up;
@@ -1787,6 +1822,18 @@ function updateBotAI(p) {
   p.input.left = false;
   p.input.right = false;
   p.input.shift = false;
+
+  const isFrozen = (gamePhase !== Phase.INGAME && gamePhase !== Phase.WARMUP) || (gamePhase === Phase.INGAME && introFreezeTimer > 0);
+  if (isFrozen) {
+    p.mouseWorld = null;
+    if (p.grabbedBox) {
+      const box = pushables.find(b => b.id === p.grabbedBox);
+      if (box) box.grabbedBy = null;
+      p.grabbedBox = null;
+    }
+    return;
+  }
+
   if (p.isStunned) return;
 
   ensureBotAI(p);
@@ -2240,10 +2287,20 @@ function smartWander(p, env, radius) {
 function gameTick() {
   tickCount++;
 
+  const isFrozen = (gamePhase !== Phase.INGAME && gamePhase !== Phase.WARMUP) || (gamePhase === Phase.INGAME && introFreezeTimer > 0);
+
+  // Decrementa o tempo de congelamento inicial da onda
+  if (introFreezeTimer > 0) {
+    introFreezeTimer--;
+  }
+
   // 1. Cronômetro das fases
   if (gamePhase === Phase.WARMUP || gamePhase === Phase.INGAME || gamePhase === Phase.ENDGAME || gamePhase === Phase.UPGRADE || gamePhase === Phase.PODIUM) {
     if (phaseTimer > 0) {
-      phaseTimer--;
+      // O cronômetro do jogo principal (INGAME) não deve correr enquanto estiver congelado
+      if (gamePhase !== Phase.INGAME || introFreezeTimer <= 0) {
+        phaseTimer--;
+      }
       if (phaseTimer <= 0) {
         if (gamePhase === Phase.WARMUP) {
           startInGame();
@@ -2262,7 +2319,7 @@ function gameTick() {
   }
 
   // 1.5. Pontuação periódica: +1 ponto por segundo para corredores vivos
-  if (gamePhase === Phase.INGAME && tickCount % TICK_RATE === 0) {
+  if (gamePhase === Phase.INGAME && !isFrozen && tickCount % TICK_RATE === 0) {
     for (const [, p] of players) {
       if (!p.isHot && p.alive) {
         p.roundScore = (p.roundScore || 0) + 1;
@@ -2272,7 +2329,7 @@ function gameTick() {
   }
 
   // 2. Spawning dinâmico de itens e moedas — apenas durante a partida!
-  if (gamePhase === Phase.INGAME) {
+  if (gamePhase === Phase.INGAME && !isFrozen) {
     pickupSpawnTimer--;
     if (pickupSpawnTimer <= 0) {
       pickupSpawnTimer = PICKUP_SPAWN_INTERVAL;
@@ -2292,519 +2349,523 @@ function gameTick() {
       updateBotAI(p);
     }
 
-    // 1. Recarga da arma (5 segundos)
-    if (p.reloadTimer > 0) {
-      p.reloadTimer--;
-      if (p.reloadTimer === 0) {
-        p.ammo = 3 + (p.upgrades ? (p.upgrades.ammo_capacity || 0) : 0);
-      }
-    }
-
-    // 2. Paralisado/Stunned (Hot com 0 de HP)
-    if (p.isStunned) {
-      p.stunTimer--;
-      if (p.stunTimer <= 0) {
-        p.isStunned = false;
-        const maxHealth = 100 + (p.upgrades ? (p.upgrades.hunter_hp || 0) * 15 : 0);
-        p.health = maxHealth; // Recupera totalmente o sangue
-        const immunitySecs = 3 + (p.upgrades ? (p.upgrades.revive_immunity || 0) : 0);
-        p.reviveImmunityTimer = immunitySecs * TICK_RATE; // Imunidade ao reviver!
-      }
-    }
-
-    // 2.5. Cura de Caçadores (Hots) ao ficar parado (3s início, 10s para encher 100%)
-    const maxHP = 100 + (p.upgrades ? (p.upgrades.hunter_hp || 0) * 15 : 0);
-    if (p.isHot && !p.isStunned && p.health < maxHP) {
-      const isMoving = p.input.up || p.input.down || p.input.left || p.input.right;
-      if (isMoving) {
-        p.stillTicks = 0;
-      } else {
-        p.stillTicks = (p.stillTicks || 0) + 1;
-        const delaySecs = Math.max(1, 3 - (p.upgrades ? (p.upgrades.still_heal_delay || 0) : 0));
-        if (p.stillTicks >= delaySecs * TICK_RATE) {
-          // Cura proporcional a 10 HP por segundo = (10 / TICK_RATE) por tick
-          let cureRate = 10 / TICK_RATE;
-          cureRate *= (1 + (p.upgrades ? (p.upgrades.hunter_still_heal || 0) : 0) * 0.25);
-          p.health = Math.min(maxHP, p.health + cureRate);
+    if (!isFrozen) {
+      // 1. Recarga da arma (5 segundos)
+      if (p.reloadTimer > 0) {
+        p.reloadTimer--;
+        if (p.reloadTimer === 0) {
+          p.ammo = 3 + (p.upgrades ? (p.upgrades.ammo_capacity || 0) : 0);
         }
       }
-    } else {
-      p.stillTicks = 0;
-    }
 
-    // 3. Debuff de velocidade por tiro (0.5s)
-    if (p.speedDebuffTimer > 0) {
-      p.speedDebuffTimer--;
-    }
-
-    // 4. Limite de segurar objeto (5 segundos)
-    if (p.grabbedBox !== null) {
-      p.holdEnergy--;
-      if (p.holdEnergy <= 0) {
-        p.holdEnergy = 0;
-        const box = pushables.find(b => b.id === p.grabbedBox);
-        if (box) box.grabbedBy = null;
-        p.grabbedBox = null;
-        p.mouseWorld = null;
+      // 2. Paralisado/Stunned (Hot com 0 de HP)
+      if (p.isStunned) {
+        p.stunTimer--;
+        if (p.stunTimer <= 0) {
+          p.isStunned = false;
+          const maxHealth = 100 + (p.upgrades ? (p.upgrades.hunter_hp || 0) * 15 : 0);
+          p.health = maxHealth; // Recupera totalmente o sangue
+          const immunitySecs = 3 + (p.upgrades ? (p.upgrades.revive_immunity || 0) : 0);
+          p.reviveImmunityTimer = immunitySecs * TICK_RATE; // Imunidade ao reviver!
+        }
       }
-    } else {
-      const maxEnergy = 300 * (1 + (p.upgrades ? (p.upgrades.tether_capacity || 0) : 0) * 0.15);
-      if (p.holdEnergy < maxEnergy) {
-        // Hots recarregam a barra 2x mais rápido que corredores
-        let regen = p.isHot ? 2 : 1;
-        regen *= (1 + (p.upgrades ? (p.upgrades.tether_regen || 0) : 0) * 0.20);
-        p.holdEnergy = Math.min(maxEnergy, p.holdEnergy + regen);
-      }
-    }
 
-    // 5. Decremento dos Timers de Buffs/Itens v6
-    if (p.speedBoostTimer > 0) p.speedBoostTimer--;
-    if (p.machinegunTimer > 0) p.machinegunTimer--;
-    if (p.shieldTimer > 0) p.shieldTimer--;
-    if (p.supernovaTimer > 0) p.supernovaTimer--;
-    if (p.gravityTimer > 0) p.gravityTimer--;
-    if (p.invisibilityTimer > 0) p.invisibilityTimer--;
-    if (p.empTimer > 0) p.empTimer--;
-    if (p.overdriveTimer > 0) p.overdriveTimer--;
-    if (p.trackerTimer > 0) p.trackerTimer--;
-    if (p.phaseshiftTimer > 0) p.phaseshiftTimer--;
-    if (p.magnetTimer > 0) p.magnetTimer--;
-    if (p.repelTimer > 0) p.repelTimer--;
-    if (p.reviveImmunityTimer > 0) p.reviveImmunityTimer--;
-
-    // Canhão Overdrive: munição infinita e sem recarga
-    if (p.overdriveTimer > 0) {
-      p.reloadTimer = 0;
-      p.ammo = 3;
-    }
-
-    // Mecânica de Corrida / Estamina (Shift)
-    // Jogador está correndo se segurar Shift e estiver se movendo
-    const isMoving = p.input.up || p.input.down || p.input.left || p.input.right;
-    if (p.input.shift && isMoving && !p.isStunned) {
-      if (p.stamina > 0) {
-        p.stamina = Math.max(0, p.stamina - 1);
-        p.isSprinting = true;
+      // 2.5. Cura de Caçadores (Hots) ao ficar parado (3s início, 10s para encher 100%)
+      const maxHP = 100 + (p.upgrades ? (p.upgrades.hunter_hp || 0) * 15 : 0);
+      if (p.isHot && !p.isStunned && p.health < maxHP) {
+        const isMoving = p.input.up || p.input.down || p.input.left || p.input.right;
+        if (isMoving) {
+          p.stillTicks = 0;
+        } else {
+          p.stillTicks = (p.stillTicks || 0) + 1;
+          const delaySecs = Math.max(1, 3 - (p.upgrades ? (p.upgrades.still_heal_delay || 0) : 0));
+          if (p.stillTicks >= delaySecs * TICK_RATE) {
+            // Cura proporcional a 10 HP por segundo = (10 / TICK_RATE) por tick
+            let cureRate = 10 / TICK_RATE;
+            cureRate *= (1 + (p.upgrades ? (p.upgrades.hunter_still_heal || 0) : 0) * 0.25);
+            p.health = Math.min(maxHP, p.health + cureRate);
+          }
+        }
       } else {
+        p.stillTicks = 0;
+      }
+
+      // 3. Debuff de velocidade por tiro (0.5s)
+      if (p.speedDebuffTimer > 0) {
+        p.speedDebuffTimer--;
+      }
+
+      // 4. Limite de segurar objeto (5 segundos)
+      if (p.grabbedBox !== null) {
+        p.holdEnergy--;
+        if (p.holdEnergy <= 0) {
+          p.holdEnergy = 0;
+          const box = pushables.find(b => b.id === p.grabbedBox);
+          if (box) box.grabbedBy = null;
+          p.grabbedBox = null;
+          p.mouseWorld = null;
+        }
+      } else {
+        const maxEnergy = 300 * (1 + (p.upgrades ? (p.upgrades.tether_capacity || 0) : 0) * 0.15);
+        if (p.holdEnergy < maxEnergy) {
+          // Hots recarregam a barra 2x mais rápido que corredores
+          let regen = p.isHot ? 2 : 1;
+          regen *= (1 + (p.upgrades ? (p.upgrades.tether_regen || 0) : 0) * 0.20);
+          p.holdEnergy = Math.min(maxEnergy, p.holdEnergy + regen);
+        }
+      }
+
+      // 5. Decremento dos Timers de Buffs/Itens v6
+      if (p.speedBoostTimer > 0) p.speedBoostTimer--;
+      if (p.machinegunTimer > 0) p.machinegunTimer--;
+      if (p.shieldTimer > 0) p.shieldTimer--;
+      if (p.supernovaTimer > 0) p.supernovaTimer--;
+      if (p.gravityTimer > 0) p.gravityTimer--;
+      if (p.invisibilityTimer > 0) p.invisibilityTimer--;
+      if (p.empTimer > 0) p.empTimer--;
+      if (p.overdriveTimer > 0) p.overdriveTimer--;
+      if (p.trackerTimer > 0) p.trackerTimer--;
+      if (p.phaseshiftTimer > 0) p.phaseshiftTimer--;
+      if (p.magnetTimer > 0) p.magnetTimer--;
+      if (p.repelTimer > 0) p.repelTimer--;
+      if (p.reviveImmunityTimer > 0) p.reviveImmunityTimer--;
+
+      // Canhão Overdrive: munição infinita e sem recarga
+      if (p.overdriveTimer > 0) {
+        p.reloadTimer = 0;
+        p.ammo = 3;
+      }
+
+      // Mecânica de Corrida / Estamina (Shift)
+      // Jogador está correndo se segurar Shift e estiver se movendo
+      const isMoving = p.input.up || p.input.down || p.input.left || p.input.right;
+      if (p.input.shift && isMoving && !p.isStunned) {
+        if (p.stamina > 0) {
+          p.stamina = Math.max(0, p.stamina - 1);
+          p.isSprinting = true;
+        } else {
+          p.isSprinting = false;
+        }
+      } else {
+        const maxStamina = 600 * (1 + (p.upgrades ? (p.upgrades.runner_stamina || 0) : 0) * 0.15);
+        let regenAmount = 600 / (15 * TICK_RATE);
+        regenAmount *= (1 + (p.upgrades ? (p.upgrades.stamina_regen || 0) : 0) * 0.20);
+        p.stamina = Math.min(maxStamina, p.stamina + regenAmount);
         p.isSprinting = false;
       }
-    } else {
-      const maxStamina = 600 * (1 + (p.upgrades ? (p.upgrades.runner_stamina || 0) : 0) * 0.15);
-      let regenAmount = 600 / (15 * TICK_RATE);
-      regenAmount *= (1 + (p.upgrades ? (p.upgrades.stamina_regen || 0) : 0) * 0.20);
-      p.stamina = Math.min(maxStamina, p.stamina + regenAmount);
-      p.isSprinting = false;
     }
   }
 
-  // 4. Detecção de Coleta de Itens v6
-  for (let i = pickups.length - 1; i >= 0; i--) {
-    const pickup = pickups[i];
-    for (const [, p] of players) {
-      if (p.isStunned) continue;
-      const px = p.x + PLAYER_SIZE / 2;
-      const py = p.y + PLAYER_SIZE / 2;
-      const ix = pickup.x + 10;
-      const iy = pickup.y + 10;
-      const dist = Math.sqrt((px - ix) * (px - ix) + (py - iy) * (py - iy));
+  if (!isFrozen) {
+    // 4. Detecção de Coleta de Itens v6
+    for (let i = pickups.length - 1; i >= 0; i--) {
+      const pickup = pickups[i];
+      for (const [, p] of players) {
+        if (p.isStunned) continue;
+        const px = p.x + PLAYER_SIZE / 2;
+        const py = p.y + PLAYER_SIZE / 2;
+        const ix = pickup.x + 10;
+        const iy = pickup.y + 10;
+        const dist = Math.sqrt((px - ix) * (px - ix) + (py - iy) * (py - iy));
 
-      if (dist < 22) { // Colisão!
-        let collected = false;
+        if (dist < 22) { // Colisão!
+          let collected = false;
 
-        if (p.isHot) {
-          // Pegador coleta Speed, Supernova, Aura Gravitacional ou EMP
-          if (pickup.type === 'speed') {
-            p.speedBoostTimer = 15 * TICK_RATE;
-            collected = true;
-          } else if (pickup.type === 'supernova') {
-            p.supernovaTimer = 10 * TICK_RATE;
-            collected = true;
-          } else if (pickup.type === 'gravity') {
-            p.gravityTimer = 12 * TICK_RATE;
-            collected = true;
-          } else if (pickup.type === 'emp') {
-            p.empTimer = getUpgradedTimer(p, 'emp', 10 * TICK_RATE);
-            collected = true;
-          } else if (pickup.type === 'tracker') {
-            p.trackerTimer = getUpgradedTimer(p, 'tracker', 10 * TICK_RATE);
-            collected = true;
-          } else if (pickup.type === 'magnetic') {
-            p.magnetTimer = 8 * TICK_RATE;
-            collected = true;
-          }
-        } else {
-          // Corredores: guardam itens no Slot Q ou E se tiverem espaço
-          if (['speed', 'machinegun', 'shield', 'invisibility', 'phaseshift', 'blink', 'repel'].includes(pickup.type)) {
-            if (!p.slotQ) {
-              p.slotQ = pickup.type;
+          if (p.isHot) {
+            // Pegador coleta Speed, Supernova, Aura Gravitacional ou EMP
+            if (pickup.type === 'speed') {
+              p.speedBoostTimer = 15 * TICK_RATE;
               collected = true;
-            } else if (!p.slotE) {
-              p.slotE = pickup.type;
+            } else if (pickup.type === 'supernova') {
+              p.supernovaTimer = 10 * TICK_RATE;
+              collected = true;
+            } else if (pickup.type === 'gravity') {
+              p.gravityTimer = 12 * TICK_RATE;
+              collected = true;
+            } else if (pickup.type === 'emp') {
+              p.empTimer = getUpgradedTimer(p, 'emp', 10 * TICK_RATE);
+              collected = true;
+            } else if (pickup.type === 'tracker') {
+              p.trackerTimer = getUpgradedTimer(p, 'tracker', 10 * TICK_RATE);
+              collected = true;
+            } else if (pickup.type === 'magnetic') {
+              p.magnetTimer = 8 * TICK_RATE;
               collected = true;
             }
+          } else {
+            // Corredores: guardam itens no Slot Q ou E se tiverem espaço
+            if (['speed', 'machinegun', 'shield', 'invisibility', 'phaseshift', 'blink', 'repel'].includes(pickup.type)) {
+              if (!p.slotQ) {
+                p.slotQ = pickup.type;
+                collected = true;
+              } else if (!p.slotE) {
+                p.slotE = pickup.type;
+                collected = true;
+              }
+            }
+          }
+
+          if (collected) {
+            broadcast({
+              type: 'collected',
+              playerId: p.id,
+              playerName: p.name,
+              itemType: pickup.type,
+              color: p.color
+            });
+            pickups.splice(i, 1);
+            break; // sai do loop de jogadores para este pickup
           }
         }
+      }
+    }
 
-        if (collected) {
+    // 4b. Detecção de Coleta de Moedas v7 e Ímã de Moedas v14
+    for (let i = coins.length - 1; i >= 0; i--) {
+      const coin = coins[i];
+      
+      // Magnetismo passivo de Células de Energia
+      for (const [, p] of players) {
+        if (p.isStunned) continue;
+        const px = p.x + PLAYER_SIZE / 2;
+        const py = p.y + PLAYER_SIZE / 2;
+        const cx = coin.x + 8;
+        const cy = coin.y + 8;
+        const dist = Math.sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy));
+        
+        const magnetLevel = p.upgrades ? (p.upgrades.coin_magnet || 0) : 0;
+        if (magnetLevel > 0 && dist <= magnetLevel * 40 && dist > 18) {
+          coin.x += ((px - cx) / dist) * 4;
+          coin.y += ((py - cy) / dist) * 4;
+        }
+      }
+
+      // Colisão de coleta
+      for (const [, p] of players) {
+        if (p.isStunned) continue;
+        const px = p.x + PLAYER_SIZE / 2;
+        const py = p.y + PLAYER_SIZE / 2;
+        const cx = coin.x + 8;
+        const cy = coin.y + 8;
+        const dist = Math.sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy));
+
+        if (dist < 22) { // Colisão!
+          p.coins = (p.coins || 0) + 1;
+          p.roundScore = (p.roundScore || 0) + 10;
+          p.score = (p.score || 0) + 10;
+
           broadcast({
-            type: 'collected',
+            type: 'coinCollected',
             playerId: p.id,
             playerName: p.name,
-            itemType: pickup.type,
+            coins: p.coins,
+            coinId: coin.id,
             color: p.color
           });
-          pickups.splice(i, 1);
-          break; // sai do loop de jogadores para este pickup
+
+          coins.splice(i, 1);
+          break; // sai do loop de jogadores para esta moeda
         }
       }
     }
-  }
 
-  // 4b. Detecção de Coleta de Moedas v7 e Ímã de Moedas v14
-  for (let i = coins.length - 1; i >= 0; i--) {
-    const coin = coins[i];
-    
-    // Magnetismo passivo de Células de Energia
+    // 5. ── Mover Jogadores ──
     for (const [, p] of players) {
       if (p.isStunned) continue;
-      const px = p.x + PLAYER_SIZE / 2;
-      const py = p.y + PLAYER_SIZE / 2;
-      const cx = coin.x + 8;
-      const cy = coin.y + 8;
-      const dist = Math.sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy));
-      
-      const magnetLevel = p.upgrades ? (p.upgrades.coin_magnet || 0) : 0;
-      if (magnetLevel > 0 && dist <= magnetLevel * 40 && dist > 18) {
-        coin.x += ((px - cx) / dist) * 4;
-        coin.y += ((py - cy) / dist) * 4;
+
+      let dx = 0, dy = 0;
+      if (p.input.up) dy -= 1;
+      if (p.input.down) dy += 1;
+      if (p.input.left) dx -= 1;
+      if (p.input.right) dx += 1;
+      if (dx !== 0 && dy !== 0) { dx *= 0.707; dy *= 0.707; }
+
+      let speed = p.isHot 
+        ? HOT_SPEED * (1 + (p.upgrades ? (p.upgrades.hunter_speed || 0) : 0) * 0.05)
+        : RUNNER_SPEED * (1 + (p.upgrades ? (p.upgrades.runner_speed || 0) : 0) * 0.05);
+
+      // Zonas de velocidade
+      const pcx = p.x + p.w / 2, pcy = p.y + p.h / 2;
+      for (const zone of speedZones) {
+        if (pcx > zone.x && pcx < zone.x + zone.w && pcy > zone.y && pcy < zone.y + zone.h) {
+          speed *= zone.type === 'boost' ? (p.isHot ? 0.75 : 1.35) : (p.isHot ? 1.35 : 0.75);
+        }
       }
-    }
 
-    // Colisão de coleta
-    for (const [, p] of players) {
-      if (p.isStunned) continue;
-      const px = p.x + PLAYER_SIZE / 2;
-      const py = p.y + PLAYER_SIZE / 2;
-      const cx = coin.x + 8;
-      const cy = coin.y + 8;
-      const dist = Math.sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy));
-
-      if (dist < 22) { // Colisão!
-        p.coins = (p.coins || 0) + 1;
-        p.roundScore = (p.roundScore || 0) + 10;
-        p.score = (p.score || 0) + 10;
-
-        broadcast({
-          type: 'coinCollected',
-          playerId: p.id,
-          playerName: p.name,
-          coins: p.coins,
-          coinId: coin.id,
-          color: p.color
-        });
-
-        coins.splice(i, 1);
-        break; // sai do loop de jogadores para esta moeda
+      // Debuff de velocidade por tiro (redução de 50%)
+      if (p.speedDebuffTimer > 0) {
+        speed *= 0.5;
       }
-    }
-  }
 
-  // 5. ── Mover Jogadores ──
-  for (const [, p] of players) {
-    if (p.isStunned) continue;
-
-    let dx = 0, dy = 0;
-    if (p.input.up) dy -= 1;
-    if (p.input.down) dy += 1;
-    if (p.input.left) dx -= 1;
-    if (p.input.right) dx += 1;
-    if (dx !== 0 && dy !== 0) { dx *= 0.707; dy *= 0.707; }
-
-    let speed = p.isHot 
-      ? HOT_SPEED * (1 + (p.upgrades ? (p.upgrades.hunter_speed || 0) : 0) * 0.05)
-      : RUNNER_SPEED * (1 + (p.upgrades ? (p.upgrades.runner_speed || 0) : 0) * 0.05);
-
-    // Zonas de velocidade
-    const pcx = p.x + p.w / 2, pcy = p.y + p.h / 2;
-    for (const zone of speedZones) {
-      if (pcx > zone.x && pcx < zone.x + zone.w && pcy > zone.y && pcy < zone.y + zone.h) {
-        speed *= zone.type === 'boost' ? (p.isHot ? 0.75 : 1.35) : (p.isHot ? 1.35 : 0.75);
+      // --- Buffs v6 ---
+      // Super Velocidade (+40%)
+      if (p.speedBoostTimer > 0) {
+        speed *= 1.4;
       }
-    }
+      // Supernova do Hot (+30%)
+      if (p.isHot && p.supernovaTimer > 0) {
+        speed *= 1.3;
+      }
+      // Sprint com Shift (+45% velocidade)
+      if (p.isSprinting) {
+        speed *= 1.45;
+      }
+      // Rastreador Térmico (+10% velocidade de perseguição)
+      if (p.isHot && p.trackerTimer > 0) {
+        speed *= 1.1;
+      }
+      // Aura de Gravidade (Corredor lento por 60% perto de Hot com Teia)
+      if (!p.isHot) {
+        let gravityFactor = 1.0;
+        for (const [, p2] of players) {
+          if (p2.isHot && p2.gravityTimer > 0) {
+            const gdx = (p2.x + p2.w / 2) - (p.x + p.w / 2);
+            const gdy = (p2.y + p2.h / 2) - (p.y + p.h / 2);
+            const gdist = Math.sqrt(gdx * gdx + gdy * gdy);
+            if (gdist <= 160) {
+              const slownessUpgrade = p2.upgrades ? (p2.upgrades.gravity_slowness || 0) : 0;
+              const factor = Math.max(0.1, 0.4 - slownessUpgrade * 0.10);
+              if (factor < gravityFactor) gravityFactor = factor;
+            }
+          }
+        }
+        if (gravityFactor < 1.0) {
+          speed *= gravityFactor;
+        }
 
-    // Debuff de velocidade por tiro (redução de 50%)
-    if (p.speedDebuffTimer > 0) {
-      speed *= 0.5;
-    }
+        // Pulso Cyber EMP (Corredor perto de Hot com EMP ativo perde arma e tether)
+        let underEmp = false;
+        for (const [, p2] of players) {
+          if (p2.isHot && p2.empTimer > 0) {
+            const edx = (p2.x + p2.w / 2) - (p.x + p.w / 2);
+            const edy = (p2.y + p2.h / 2) - (p.y + p.h / 2);
+            const edist = Math.sqrt(edx * edx + edy * edy);
+            if (edist <= 200) {
+              underEmp = true;
+              break;
+            }
+          }
+        }
+        if (underEmp) {
+          p.reloadTimer = Math.max(p.reloadTimer, 2 * TICK_RATE); // Bloqueia tiro/arma
+          p.ammo = 0; // Zerado!
+          p.holdEnergy = 0; // Zera tether!
+        }
+      }
 
-    // --- Buffs v6 ---
-    // Super Velocidade (+40%)
-    if (p.speedBoostTimer > 0) {
-      speed *= 1.4;
-    }
-    // Supernova do Hot (+30%)
-    if (p.isHot && p.supernovaTimer > 0) {
-      speed *= 1.3;
-    }
-    // Sprint com Shift (+45% velocidade)
-    if (p.isSprinting) {
-      speed *= 1.45;
-    }
-    // Rastreador Térmico (+10% velocidade de perseguição)
-    if (p.isHot && p.trackerTimer > 0) {
-      speed *= 1.1;
-    }
-    // Aura de Gravidade (Corredor lento por 60% perto de Hot com Teia)
-    if (!p.isHot) {
-      let gravityFactor = 1.0;
-      for (const [, p2] of players) {
-        if (p2.isHot && p2.gravityTimer > 0) {
-          const gdx = (p2.x + p2.w / 2) - (p.x + p.w / 2);
-          const gdy = (p2.y + p2.h / 2) - (p.y + p.h / 2);
-          const gdist = Math.sqrt(gdx * gdx + gdy * gdy);
-          if (gdist <= 160) {
-            const slownessUpgrade = p2.upgrades ? (p2.upgrades.gravity_slowness || 0) : 0;
-            const factor = Math.max(0.1, 0.4 - slownessUpgrade * 0.10);
-            if (factor < gravityFactor) gravityFactor = factor;
+      // --- Novos Efeitos de Força v9 (Magnetismo e Repulsão) ---
+      let fx = 0, fy = 0;
+
+      if (!p.isHot) {
+        // 1. Corredor sob atração magnética de qualquer Hot com Vórtex Ativo
+        for (const [, p2] of players) {
+          if (p2.isHot && p2.magnetTimer > 0) {
+            const mdx = (p2.x + PLAYER_SIZE / 2) - (p.x + PLAYER_SIZE / 2);
+            const mdy = (p2.y + PLAYER_SIZE / 2) - (p.y + PLAYER_SIZE / 2);
+            const mdist = Math.sqrt(mdx * mdx + mdy * mdy);
+            if (mdist > 0 && mdist <= 240) {
+              const magnetUpgrade = p2.upgrades ? (p2.upgrades.vortex_strength || 0) : 0;
+              const pullStrength = 2.8 * (1 + magnetUpgrade * 0.15) * (1 - mdist / 240); // Força diminui com a distância
+              fx += (mdx / mdist) * pullStrength;
+              fy += (mdy / mdist) * pullStrength;
+            }
+          }
+        }
+      } else {
+        // 2. Hot sob repulsão de qualquer Corredor com Pulso Repulsor Ativo
+        for (const [, p2] of players) {
+          if (!p2.isHot && p2.repelTimer > 0) {
+            const rdx = (p.x + PLAYER_SIZE / 2) - (p2.x + PLAYER_SIZE / 2);
+            const rdy = (p.y + PLAYER_SIZE / 2) - (p2.y + PLAYER_SIZE / 2);
+            const rdist = Math.sqrt(rdx * rdx + rdy * rdy);
+            if (rdist > 0 && rdist <= 180) {
+              const pushStrength = 5.2 * (1 - rdist / 180); // Empurrão diminui com a distância
+              fx += (rdx / rdist) * pushStrength;
+              fy += (rdy / rdist) * pushStrength;
+            }
           }
         }
       }
-      if (gravityFactor < 1.0) {
-        speed *= gravityFactor;
+
+      // Mover X
+      const hasPhaseShift = p.phaseshiftTimer > 0;
+      let nx = p.x + dx * speed + fx;
+      if (hasPhaseShift || !collidesWithWalls(nx, p.y, p.w, p.h)) {
+        p.x = nx;
+      }
+      // Mover Y
+      let ny = p.y + dy * speed + fy;
+      if (hasPhaseShift || !collidesWithWalls(p.x, ny, p.w, p.h)) {
+        p.y = ny;
       }
 
-      // Pulso Cyber EMP (Corredor perto de Hot com EMP ativo perde arma e tether)
-      let underEmp = false;
-      for (const [, p2] of players) {
-        if (p2.isHot && p2.empTimer > 0) {
-          const edx = (p2.x + p2.w / 2) - (p.x + p.w / 2);
-          const edy = (p2.y + p2.h / 2) - (p.y + p.h / 2);
-          const edist = Math.sqrt(edx * edx + edy * edy);
-          if (edist <= 200) {
-            underEmp = true;
-            break;
-          }
-        }
-      }
-      if (underEmp) {
-        p.reloadTimer = Math.max(p.reloadTimer, 2 * TICK_RATE); // Bloqueia tiro/arma
-        p.ammo = 0; // Zerado!
-        p.holdEnergy = 0; // Zera tether!
-      }
-    }
+      // --- Resolução de Sobreposição Física com Caixas (Permite empurrão por corpo e evita travamento) ---
+      if (!p.isStunned && !hasPhaseShift) {
+        for (const box of pushables) {
+          if (p.x + p.w > box.x && p.x < box.x + box.w && p.y + p.h > box.y && p.y < box.y + box.h) {
+            const overlapX = Math.min(p.x + p.w - box.x, box.x + box.w - p.x);
+            const overlapY = Math.min(p.y + p.h - box.y, box.y + box.h - p.y);
 
-    // --- Novos Efeitos de Força v9 (Magnetismo e Repulsão) ---
-    let fx = 0, fy = 0;
-
-    if (!p.isHot) {
-      // 1. Corredor sob atração magnética de qualquer Hot com Vórtex Ativo
-      for (const [, p2] of players) {
-        if (p2.isHot && p2.magnetTimer > 0) {
-          const mdx = (p2.x + PLAYER_SIZE / 2) - (p.x + PLAYER_SIZE / 2);
-          const mdy = (p2.y + PLAYER_SIZE / 2) - (p.y + PLAYER_SIZE / 2);
-          const mdist = Math.sqrt(mdx * mdx + mdy * mdy);
-          if (mdist > 0 && mdist <= 240) {
-            const magnetUpgrade = p2.upgrades ? (p2.upgrades.vortex_strength || 0) : 0;
-            const pullStrength = 2.8 * (1 + magnetUpgrade * 0.15) * (1 - mdist / 240); // Força diminui com a distância
-            fx += (mdx / mdist) * pullStrength;
-            fy += (mdy / mdist) * pullStrength;
-          }
-        }
-      }
-    } else {
-      // 2. Hot sob repulsão de qualquer Corredor com Pulso Repulsor Ativo
-      for (const [, p2] of players) {
-        if (!p2.isHot && p2.repelTimer > 0) {
-          const rdx = (p.x + PLAYER_SIZE / 2) - (p2.x + PLAYER_SIZE / 2);
-          const rdy = (p.y + PLAYER_SIZE / 2) - (p2.y + PLAYER_SIZE / 2);
-          const rdist = Math.sqrt(rdx * rdx + rdy * rdy);
-          if (rdist > 0 && rdist <= 180) {
-            const pushStrength = 5.2 * (1 - rdist / 180); // Empurrão diminui com a distância
-            fx += (rdx / rdist) * pushStrength;
-            fy += (rdy / rdist) * pushStrength;
-          }
-        }
-      }
-    }
-
-    // Mover X
-    const hasPhaseShift = p.phaseshiftTimer > 0;
-    let nx = p.x + dx * speed + fx;
-    if (hasPhaseShift || !collidesWithWalls(nx, p.y, p.w, p.h)) {
-      p.x = nx;
-    }
-    // Mover Y
-    let ny = p.y + dy * speed + fy;
-    if (hasPhaseShift || !collidesWithWalls(p.x, ny, p.w, p.h)) {
-      p.y = ny;
-    }
-
-    // --- Resolução de Sobreposição Física com Caixas (Permite empurrão por corpo e evita travamento) ---
-    if (!p.isStunned && !hasPhaseShift) {
-      for (const box of pushables) {
-        if (p.x + p.w > box.x && p.x < box.x + box.w && p.y + p.h > box.y && p.y < box.y + box.h) {
-          const overlapX = Math.min(p.x + p.w - box.x, box.x + box.w - p.x);
-          const overlapY = Math.min(p.y + p.h - box.y, box.y + box.h - p.y);
-
-          if (overlapX < overlapY) {
-            const pushDir = (box.x + box.w / 2 > p.x + p.w / 2) ? 1 : -1;
-            const newBoxX = box.x + pushDir * overlapX;
-            if (!collidesWithWalls(newBoxX + 1, box.y + 1, box.w - 2, box.h - 2) &&
-              !collidesWithBoxes(newBoxX + 1, box.y + 1, box.w - 2, box.h - 2, box.id)) {
-              box.x = newBoxX;
+            if (overlapX < overlapY) {
+              const pushDir = (box.x + box.w / 2 > p.x + p.w / 2) ? 1 : -1;
+              const newBoxX = box.x + pushDir * overlapX;
+              if (!collidesWithWalls(newBoxX + 1, box.y + 1, box.w - 2, box.h - 2) &&
+                !collidesWithBoxes(newBoxX + 1, box.y + 1, box.w - 2, box.h - 2, box.id)) {
+                box.x = newBoxX;
+              } else {
+                p.x -= pushDir * overlapX;
+              }
             } else {
-              p.x -= pushDir * overlapX;
+              const pushDir = (box.y + box.h / 2 > p.y + p.h / 2) ? 1 : -1;
+              const newBoxY = box.y + pushDir * overlapY;
+              if (!collidesWithWalls(box.x + 1, newBoxY + 1, box.w - 2, box.h - 2) &&
+                !collidesWithBoxes(box.x + 1, newBoxY + 1, box.w - 2, box.h - 2, box.id)) {
+                box.y = newBoxY;
+              } else {
+                p.y -= pushDir * overlapY;
+              }
             }
-          } else {
-            const pushDir = (box.y + box.h / 2 > p.y + p.h / 2) ? 1 : -1;
-            const newBoxY = box.y + pushDir * overlapY;
-            if (!collidesWithWalls(box.x + 1, newBoxY + 1, box.w - 2, box.h - 2) &&
-              !collidesWithBoxes(box.x + 1, newBoxY + 1, box.w - 2, box.h - 2, box.id)) {
-              box.y = newBoxY;
+          }
+        }
+      }
+
+      // Clamps
+      p.x = Math.max(TILE, Math.min(MAP_W - TILE - p.w, p.x));
+      p.y = Math.max(TILE, Math.min(MAP_H - TILE - p.h, p.y));
+    }
+
+    // 6. ── Mover Caixas Arrastadas ──
+    for (const box of pushables) {
+      if (!box.grabbedBy) continue;
+      const p = players.get(box.grabbedBy);
+      if (!p || !p.mouseWorld) continue;
+
+      const tx = p.mouseWorld.x - box.w / 2;
+      const ty = p.mouseWorld.y - box.h / 2;
+      const ddx = tx - box.x;
+      const ddy = ty - box.y;
+      const dist = Math.sqrt(ddx * ddx + ddy * ddy);
+      if (dist < 1) continue;
+
+      const spd = Math.min(DRAG_SPEED, dist);
+      const mx = (ddx / dist) * spd;
+      const my = (ddy / dist) * spd;
+
+      const nxB = box.x + mx;
+      if (!collidesWithWalls(nxB + 1, box.y + 1, box.w - 2, box.h - 2) &&
+        !collidesWithBoxes(nxB + 1, box.y + 1, box.w - 2, box.h - 2, box.id)) {
+        box.x = nxB;
+      }
+      const nyB = box.y + my;
+      if (!collidesWithWalls(box.x + 1, nyB + 1, box.w - 2, box.h - 2) &&
+        !collidesWithBoxes(box.x + 1, nyB + 1, box.w - 2, box.h - 2, box.id)) {
+        box.y = nyB;
+      }
+    }
+
+    // 6b. ── Vórtex Magnético sobre Caixas v9 ──
+    for (const box of pushables) {
+      let bfx = 0, bfy = 0;
+      for (const [, p] of players) {
+        if (p.isHot && p.magnetTimer > 0) {
+          const bdx = (p.x + PLAYER_SIZE / 2) - (box.x + box.w / 2);
+          const bdy = (p.y + PLAYER_SIZE / 2) - (box.y + box.h / 2);
+          const bdist = Math.sqrt(bdx * bdx + bdy * bdy);
+          if (bdist > 35 && bdist <= 240) {
+            const pullStrength = 2.5 * (1 - bdist / 240); // Força diminui com a distância
+            bfx += (bdx / bdist) * pullStrength;
+            bfy += (bdy / bdist) * pullStrength;
+          }
+        }
+      }
+
+      if (bfx !== 0 || bfy !== 0) {
+        const nxBoxX = box.x + bfx;
+        if (!collidesWithWalls(nxBoxX + 1, box.y + 1, box.w - 2, box.h - 2) &&
+          !collidesWithBoxes(nxBoxX + 1, box.y + 1, box.w - 2, box.h - 2, box.id)) {
+          box.x = nxBoxX;
+        }
+        const nxBoxY = box.y + bfy;
+        if (!collidesWithWalls(box.x + 1, nxBoxY + 1, box.w - 2, box.h - 2) &&
+          !collidesWithBoxes(box.x + 1, nxBoxY + 1, box.w - 2, box.h - 2, box.id)) {
+          box.y = nxBoxY;
+        }
+      }
+    }
+
+    // 7. ── Infecção (Apenas em Partida InGame e Hots não Stunned!) ──
+    if (gamePhase === Phase.INGAME) {
+      const hots = [...players.values()].filter(p => p.isHot && !p.isStunned);
+      const runners = [...players.values()].filter(p => !p.isHot);
+      for (const hot of hots) {
+        for (const runner of runners) {
+          const dx = (hot.x + hot.w / 2) - (runner.x + runner.w / 2);
+          const dy = (hot.y + hot.h / 2) - (runner.y + runner.h / 2);
+
+          let infRad = INFECTION_RADIUS;
+          if (hot.supernovaTimer > 0) {
+            infRad += 25 + (hot.upgrades ? (hot.upgrades.supernova_radius || 0) * 20 : 0); // Supernova aumenta raio de contágio + upgrade!
+          }
+
+          if (Math.sqrt(dx * dx + dy * dy) < infRad) {
+            // Se o corredor tiver escudo de plasma ativo, absorve e empurra o pegador
+            if (runner.shieldTimer > 0) {
+              runner.shieldTimer = 0; // Consome escudo
+
+              // Empurra o Hot 120 pixels na direção oposta
+              const pushDist = 120;
+              const len = Math.sqrt(dx * dx + dy * dy) || 1;
+              const hux = dx / len;
+              const huy = dy / len;
+              const targetHotX = hot.x + hux * pushDist;
+              const targetHotY = hot.y + huy * pushDist;
+
+              if (!collidesWithWalls(targetHotX, hot.y, hot.w, hot.h) &&
+                !collidesWithBoxes(targetHotX, hot.y, hot.w, hot.h, -1)) {
+                hot.x = targetHotX;
+              }
+              if (!collidesWithWalls(hot.x, targetHotY, hot.w, hot.h) &&
+                !collidesWithBoxes(hot.x, targetHotY, hot.w, hot.h, -1)) {
+                hot.y = targetHotY;
+              }
+
+              // Overcharged ganha +15 pontos por causar impacto que estourou o escudo
+              hot.roundScore = (hot.roundScore || 0) + 15;
+              hot.score = (hot.score || 0) + 15;
+
+              broadcast({
+                type: 'shieldPopped',
+                runnerId: runner.id,
+                runnerName: runner.name,
+                hotId: hot.id,
+                hotName: hot.name
+              });
             } else {
-              p.y -= pushDir * overlapY;
+              // Contamina normalmente e limpa buffs exclusivos de corredor
+              runner.isHot = true;
+              runner.speed = HOT_SPEED;
+              runner.health = 100 + (runner.upgrades ? (runner.upgrades.hunter_hp || 0) * 15 : 0);
+              runner.machinegunTimer = 0;
+              runner.shieldTimer = 0;
+              runner.invisibilityTimer = 0;
+
+              // Overcharged ganha +50 pontos por infectar corredor
+              hot.roundScore = (hot.roundScore || 0) + 50;
+              hot.score = (hot.score || 0) + 50;
+
+              broadcast({
+                type: 'infected',
+                playerId: runner.id,
+                byPlayerId: hot.id,
+                name: runner.name,
+                byName: hot.name,
+              });
             }
           }
         }
       }
+      checkWinConditions();
     }
-
-    // Clamps
-    p.x = Math.max(TILE, Math.min(MAP_W - TILE - p.w, p.x));
-    p.y = Math.max(TILE, Math.min(MAP_H - TILE - p.h, p.y));
-  }
-
-  // 6. ── Mover Caixas Arrastadas ──
-  for (const box of pushables) {
-    if (!box.grabbedBy) continue;
-    const p = players.get(box.grabbedBy);
-    if (!p || !p.mouseWorld) continue;
-
-    const tx = p.mouseWorld.x - box.w / 2;
-    const ty = p.mouseWorld.y - box.h / 2;
-    const ddx = tx - box.x;
-    const ddy = ty - box.y;
-    const dist = Math.sqrt(ddx * ddx + ddy * ddy);
-    if (dist < 1) continue;
-
-    const spd = Math.min(DRAG_SPEED, dist);
-    const mx = (ddx / dist) * spd;
-    const my = (ddy / dist) * spd;
-
-    const nxB = box.x + mx;
-    if (!collidesWithWalls(nxB + 1, box.y + 1, box.w - 2, box.h - 2) &&
-      !collidesWithBoxes(nxB + 1, box.y + 1, box.w - 2, box.h - 2, box.id)) {
-      box.x = nxB;
-    }
-    const nyB = box.y + my;
-    if (!collidesWithWalls(box.x + 1, nyB + 1, box.w - 2, box.h - 2) &&
-      !collidesWithBoxes(box.x + 1, nyB + 1, box.w - 2, box.h - 2, box.id)) {
-      box.y = nyB;
-    }
-  }
-
-  // 6b. ── Vórtex Magnético sobre Caixas v9 ──
-  for (const box of pushables) {
-    let bfx = 0, bfy = 0;
-    for (const [, p] of players) {
-      if (p.isHot && p.magnetTimer > 0) {
-        const bdx = (p.x + PLAYER_SIZE / 2) - (box.x + box.w / 2);
-        const bdy = (p.y + PLAYER_SIZE / 2) - (box.y + box.h / 2);
-        const bdist = Math.sqrt(bdx * bdx + bdy * bdy);
-        if (bdist > 35 && bdist <= 240) {
-          const pullStrength = 2.5 * (1 - bdist / 240); // Força diminui com a distância
-          bfx += (bdx / bdist) * pullStrength;
-          bfy += (bdy / bdist) * pullStrength;
-        }
-      }
-    }
-
-    if (bfx !== 0 || bfy !== 0) {
-      const nxBoxX = box.x + bfx;
-      if (!collidesWithWalls(nxBoxX + 1, box.y + 1, box.w - 2, box.h - 2) &&
-        !collidesWithBoxes(nxBoxX + 1, box.y + 1, box.w - 2, box.h - 2, box.id)) {
-        box.x = nxBoxX;
-      }
-      const nxBoxY = box.y + bfy;
-      if (!collidesWithWalls(box.x + 1, nxBoxY + 1, box.w - 2, box.h - 2) &&
-        !collidesWithBoxes(box.x + 1, nxBoxY + 1, box.w - 2, box.h - 2, box.id)) {
-        box.y = nxBoxY;
-      }
-    }
-  }
-
-  // 7. ── Infecção (Apenas em Partida InGame e Hots não Stunned!) ──
-  if (gamePhase === Phase.INGAME) {
-    const hots = [...players.values()].filter(p => p.isHot && !p.isStunned);
-    const runners = [...players.values()].filter(p => !p.isHot);
-    for (const hot of hots) {
-      for (const runner of runners) {
-        const dx = (hot.x + hot.w / 2) - (runner.x + runner.w / 2);
-        const dy = (hot.y + hot.h / 2) - (runner.y + runner.h / 2);
-
-        let infRad = INFECTION_RADIUS;
-        if (hot.supernovaTimer > 0) {
-          infRad += 25 + (hot.upgrades ? (hot.upgrades.supernova_radius || 0) * 20 : 0); // Supernova aumenta raio de contágio + upgrade!
-        }
-
-        if (Math.sqrt(dx * dx + dy * dy) < infRad) {
-          // Se o corredor tiver escudo de plasma ativo, absorve e empurra o pegador
-          if (runner.shieldTimer > 0) {
-            runner.shieldTimer = 0; // Consome escudo
-
-            // Empurra o Hot 120 pixels na direção oposta
-            const pushDist = 120;
-            const len = Math.sqrt(dx * dx + dy * dy) || 1;
-            const hux = dx / len;
-            const huy = dy / len;
-            const targetHotX = hot.x + hux * pushDist;
-            const targetHotY = hot.y + huy * pushDist;
-
-            if (!collidesWithWalls(targetHotX, hot.y, hot.w, hot.h) &&
-              !collidesWithBoxes(targetHotX, hot.y, hot.w, hot.h, -1)) {
-              hot.x = targetHotX;
-            }
-            if (!collidesWithWalls(hot.x, targetHotY, hot.w, hot.h) &&
-              !collidesWithBoxes(hot.x, targetHotY, hot.w, hot.h, -1)) {
-              hot.y = targetHotY;
-            }
-
-            // Overcharged ganha +15 pontos por causar impacto que estourou o escudo
-            hot.roundScore = (hot.roundScore || 0) + 15;
-            hot.score = (hot.score || 0) + 15;
-
-            broadcast({
-              type: 'shieldPopped',
-              runnerId: runner.id,
-              runnerName: runner.name,
-              hotId: hot.id,
-              hotName: hot.name
-            });
-          } else {
-            // Contamina normalmente e limpa buffs exclusivos de corredor
-            runner.isHot = true;
-            runner.speed = HOT_SPEED;
-            runner.health = 100 + (runner.upgrades ? (runner.upgrades.hunter_hp || 0) * 15 : 0);
-            runner.machinegunTimer = 0;
-            runner.shieldTimer = 0;
-            runner.invisibilityTimer = 0;
-
-            // Overcharged ganha +50 pontos por infectar corredor
-            hot.roundScore = (hot.roundScore || 0) + 50;
-            hot.score = (hot.score || 0) + 50;
-
-            broadcast({
-              type: 'infected',
-              playerId: runner.id,
-              byPlayerId: hot.id,
-              name: runner.name,
-              byName: hot.name,
-            });
-          }
-        }
-      }
-    }
-    checkWinConditions();
   }
 
   // 8. ── Estado Periódico (Envia pickups v6 para os clientes!) ──
@@ -2819,7 +2880,8 @@ function gameTick() {
       hotsCount: [...players.values()].filter(p => p.isHot).length,
       pickups: pickups.map(pk => ({ id: pk.id, x: pk.x, y: pk.y, type: pk.type })), // Envia os drops ativos
       coins: coins.map(c => ({ id: c.id, x: c.x, y: c.y })), // Envia as moedas ativas
-      currentRound: currentRound
+      currentRound: currentRound,
+      introFreezeTimer: Math.ceil(introFreezeTimer / TICK_RATE)
     });
   }
 }

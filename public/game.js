@@ -606,6 +606,17 @@ function handleMessage(msg) {
       if (msg.pickups !== undefined) activePickups = msg.pickups; // Captura drops v6!
       if (msg.coins !== undefined) activeCoins = msg.coins;     // Captura moedas v7!
 
+      // Sincronização autoritativa da contagem regressiva inicial
+      if (msg.introFreezeTimer !== undefined && msg.introFreezeTimer > 0 && phase === 'ingame') {
+        const cTimer = document.getElementById('introCountdown');
+        if (cTimer) {
+          cTimer.textContent = msg.introFreezeTimer;
+        }
+        hotSelectScreen.classList.remove('hidden');
+      } else if (phase === 'ingame') {
+        hotSelectScreen.classList.add('hidden');
+      }
+
       const ids = new Set();
       for (const sp of msg.players) {
         ids.add(sp.id);
@@ -1045,8 +1056,8 @@ function updateHUD() {
   hudRunners.textContent = `🏃 ${runnersCount}`;
   hudHots.textContent = `⚡ ${hotsCount}`;
 
-  // Alerta sonoro dos 10 segundos finais da partida
-  if (phase === 'ingame' && timer <= 10 && timer > 0 && !alert10sFired) {
+  // Alerta sonoro dos 10 segundos finais da partida (Sincronizado aos 7s para terminar exatamente no zero)
+  if (phase === 'ingame' && timer <= 7 && timer > 0 && !alert10sFired) {
     alert10sFired = true;
     sfx10s.currentTime = 0;
     sfx10s.play().catch(() => {}); // Silencia erros de autoplay
@@ -1433,7 +1444,10 @@ function showHotSelect(hotIds) {
   
   hotSelectName.textContent = names.join(' & ');
   hotSelectScreen.classList.remove('hidden');
-  setTimeout(() => hotSelectScreen.classList.add('hidden'), 3500);
+  const cTimer = document.getElementById('introCountdown');
+  if (cTimer) {
+    cTimer.textContent = '3';
+  }
 }
 
 function showEndScreen(w) {
