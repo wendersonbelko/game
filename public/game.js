@@ -565,6 +565,15 @@ function connect() {
     joinBtn.textContent = 'ENTRAR NA ARENA';
     joinBtn.style.opacity = '1';
     joinBtn.style.cursor = 'pointer';
+    
+    // Altera para online no início, esperando o primeiro gameState
+    const badge = document.getElementById('lobbyStatusBadge');
+    if (badge) {
+      badge.textContent = 'CONECTADO';
+      badge.className = 'status-badge online';
+    }
+    const dot = document.querySelector('.status-indicator-dot');
+    if (dot) dot.className = 'status-indicator-dot online';
   };
   ws.onmessage = e => handleMessage(JSON.parse(e.data));
   ws.onclose = () => {
@@ -575,6 +584,7 @@ function connect() {
     joinBtn.style.cursor = 'not-allowed';
     showLobbyScreen();
     setTimeout(connect, 2000);
+    updateLobbyStatusOffline();
   };
 }
 
@@ -605,6 +615,9 @@ function handleMessage(msg) {
       if (msg.pushables) pushables = msg.pushables;
       if (msg.pickups !== undefined) activePickups = msg.pickups; // Captura drops v6!
       if (msg.coins !== undefined) activeCoins = msg.coins;     // Captura moedas v7!
+
+      // Atualiza o painel do lobby em tempo real
+      updateLobbyStatusPanel(msg);
 
       // Sincronização autoritativa da contagem regressiva inicial
       if (msg.introFreezeTimer !== undefined && msg.introFreezeTimer > 0 && phase === 'ingame') {
@@ -994,6 +1007,13 @@ function handleMessage(msg) {
       break;
     }
 
+    case 'kickToLobby': {
+      showLobbyScreen();
+      const pdM = document.getElementById('podiumModal');
+      if (pdM) pdM.classList.add('hidden');
+      break;
+    }
+
     case 'error':
       alert(msg.message);
       break;
@@ -1028,6 +1048,150 @@ function showLobbyScreen() {
   myId = null;
   gameMap = null;
   players.clear();
+}
+
+function updateLobbyStatusPanel(msg) {
+  const badge = document.getElementById('lobbyStatusBadge');
+  const dot = document.querySelector('.status-indicator-dot');
+  const count = document.getElementById('lobbyPlayersCount');
+  const waves = document.getElementById('lobbyWavesInfo');
+  const progressBar = document.getElementById('lobbyWavesProgressBar');
+  const list = document.getElementById('lobbyTop3List');
+
+  if (badge) {
+    badge.textContent = 'CONECTADO';
+    badge.className = 'status-badge online';
+  }
+  if (dot) {
+    dot.className = 'status-indicator-dot online';
+  }
+
+  // Conta total de jogadores e separa humanos e bots
+  const totalPlayers = msg.players ? msg.players.length : 0;
+  const humanPlayers = msg.players ? msg.players.filter(p => !p.isBot).length : 0;
+  const botPlayers = totalPlayers - humanPlayers;
+
+  if (count) {
+    if (botPlayers > 0) {
+      count.textContent = `${humanPlayers} (${botPlayers} 🤖)`;
+    } else {
+      count.textContent = `${humanPlayers}`;
+    }
+  }
+
+  // Ondas e Rodadas
+  const round = msg.currentRound || 1;
+  const passed = round - 1;
+  const remaining = 7 - round;
+
+  if (waves) {
+    if (msg.phase === 'lobby') {
+      waves.textContent = 'Aguardando Início';
+    } else if (msg.phase === 'podium' || msg.phase === 'endgame') {
+      waves.textContent = 'Torneio Concluído';
+    } else {
+      waves.textContent = `Onda ${round}/7 (Faltam ${remaining})`;
+    }
+  }
+
+  if (progressBar) {
+    if (msg.phase === 'podium' || msg.phase === 'endgame') {
+      progressBar.style.width = '100%';
+    } else {
+      const progressPercent = (passed / 7) * 100;
+      progressBar.style.width = `${progressPercent}%`;
+    }
+  }
+
+  // Renderiza Top 3 Líderes
+  if (list) {
+    list.innerHTML = '';
+    const sorted = [...(msg.players || [])].sort((a, b) => (b.score || 0) - (a.score || 0));
+    const top3 = sorted.slice(0, 3);
+
+    top3.forEach((p, index) => {
+      const row = document.createElement('div');
+      row.className = 'lobby-top3-row';
+      row.style.borderLeft = `3px solid ${p.color || '#00f0ff'}`;
+
+      const leftDiv = document.createElement('div');
+      leftDiv.className = 'lobby-top3-left';
+
+      const badgeSpan = document.createElement('span');
+      badgeSpan.className = 'lobby-top3-badge';
+      badgeSpan.style.color = index === 0 ? '#ffcc00' : index === 1 ? '#00f0ff' : '#ff007f';
+      badgeSpan.textContent = index === 0 ? '🥇' : index === 1 ? '🥈' : '🥉';
+      leftDiv.appendChild(badgeSpan);
+
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'lobby-top3-name';
+      nameSpan.style.color = p.color || '#fff';
+      nameSpan.textContent = (p.isBot ? '🤖 ' : '') + p.name;
+      leftDiv.appendChild(nameSpan);
+
+      row.appendChild(leftDiv);
+
+      const scoreSpan = document.createElement('span');
+      scoreSpan.className = 'lobby-top3-score';
+      scoreSpan.textContent = `${p.score || 0} pts`;
+      row.appendChild(scoreSpan);
+
+      list.appendChild(row);
+    });
+
+    // Placeholders se faltar gente para completar o Top 3
+    for (let i = top3.length; i < 3; i++) {
+      const row = document.createElement('div');
+      row.className = 'lobby-top3-row';
+      row.style.opacity = '0.35';
+      row.style.borderLeft = '3px dashed rgba(255,255,255,0.15)';
+
+      const leftDiv = document.createElement('div');
+      leftDiv.className = 'lobby-top3-left';
+
+      const badgeSpan = document.createElement('span');
+      badgeSpan.className = 'lobby-top3-badge';
+      badgeSpan.textContent = i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉';
+      leftDiv.appendChild(badgeSpan);
+
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'lobby-top3-name';
+      nameSpan.textContent = '—';
+      leftDiv.appendChild(nameSpan);
+
+      row.appendChild(leftDiv);
+
+      const scoreSpan = document.createElement('span');
+      scoreSpan.className = 'lobby-top3-score';
+      scoreSpan.textContent = '0 pts';
+      row.appendChild(scoreSpan);
+
+      list.appendChild(row);
+    }
+  }
+}
+
+function updateLobbyStatusOffline() {
+  const badge = document.getElementById('lobbyStatusBadge');
+  const dot = document.querySelector('.status-indicator-dot');
+  const count = document.getElementById('lobbyPlayersCount');
+  const waves = document.getElementById('lobbyWavesInfo');
+  const progressBar = document.getElementById('lobbyWavesProgressBar');
+  const list = document.getElementById('lobbyTop3List');
+
+  if (badge) {
+    badge.textContent = 'OFFLINE';
+    badge.className = 'status-badge';
+  }
+  if (dot) {
+    dot.className = 'status-indicator-dot';
+  }
+  if (count) count.textContent = '0';
+  if (waves) waves.textContent = 'Desconectado';
+  if (progressBar) progressBar.style.width = '0%';
+  if (list) {
+    list.innerHTML = '<div class="lobby-top3-empty">Servidor offline. Tentando reconectar...</div>';
+  }
 }
 
 function updateHUD() {
@@ -2294,6 +2458,12 @@ if (podiumCloseBtn) {
   podiumCloseBtn.addEventListener('click', () => {
     const pdM = document.getElementById('podiumModal');
     if (pdM) pdM.classList.add('hidden');
+    
+    // Sinalizar ao servidor e retornar localmente para a tela de login
+    if (ws && ws.readyState === 1) {
+      ws.send(JSON.stringify({ type: 'leaveToLobby' }));
+    }
+    showLobbyScreen();
   });
 }
 

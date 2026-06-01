@@ -302,8 +302,8 @@ function findSpawnPos() {
 // ─── Lógica do Servidor ───
 function broadcast(msg) {
   const data = JSON.stringify(msg);
-  for (const [, p] of players) {
-    if (p.ws && p.ws.readyState === 1) p.ws.send(data);
+  for (const client of wss.clients) {
+    if (client.readyState === 1) client.send(data);
   }
 }
 
@@ -755,6 +755,26 @@ function resetGame() {
   }
 }
 
+function killMatchAndReturnAllToLobby() {
+  // Chuta todos os jogadores humanos conectados para a tela de login
+  broadcast({ type: 'kickToLobby' });
+
+  // Limpa todos os jogadores (humanos e bots)
+  players.clear();
+
+  // Volta para o estado LOBBY inicial
+  currentRound = 1;
+  gamePhase = Phase.LOBBY;
+  phaseTimer = 0;
+  winner = null;
+  pickups = [];
+  coins = [];
+  generateMap();
+
+  // Transmite a alteração para todos os lobbies
+  broadcast({ type: 'phaseChange', phase: Phase.LOBBY, timer: 0, map: getMapData() });
+}
+
 function checkWinConditions() {
   if (gamePhase !== Phase.INGAME) return;
   const runners = [...players.values()].filter(p => !p.isHot);
@@ -1022,6 +1042,21 @@ const wss = new WebSocketServer({ server });
 
 wss.on('connection', (ws) => {
   let currentPlayer = null;
+
+  // Enviar estado inicial do lobby/servidor imediatamente ao conectar
+  ws.send(JSON.stringify({
+    type: 'gameState',
+    players: [...players.values()].map(serializePlayer),
+    pushables: [],
+    phase: gamePhase,
+    timer: Math.ceil(phaseTimer / TICK_RATE),
+    runnersCount: [...players.values()].filter(p => !p.isHot).length,
+    hotsCount: [...players.values()].filter(p => p.isHot).length,
+    pickups: [],
+    coins: [],
+    currentRound: currentRound,
+    introFreezeTimer: Math.ceil(introFreezeTimer / TICK_RATE)
+  }));
 
   ws.on('message', (raw) => {
     let msg;
@@ -1351,6 +1386,31 @@ wss.on('connection', (ws) => {
           phaseTimer = 1; 
         }
       }
+    }
+
+    if (msg.type === 'leaveToLobby') {
+      if (currentPlayer) {
+        if (currentPlayer.grabbedBox) {
+          const box = pushables.find(b => b.id === currentPlayer.grabbedBox);
+          if (box) box.grabbedBy = null;
+        }
+        const id = currentPlayer.id;
+        players.delete(id);
+        broadcast({ type: 'playerLeft', id });
+        currentPlayer = null;
+
+        // Validações se o jogo precisa voltar a lobby
+        if (players.size === 0) {
+          resetGame();
+        } else {
+          if (players.size < MIN_PLAYERS_TO_START && gamePhase !== Phase.LOBBY) {
+            resetGame();
+          } else {
+            checkWinConditions();
+          }
+        }
+      }
+      return;
     }
 
     if (msg.type === 'addBots') {
@@ -2312,7 +2372,7 @@ function gameTick() {
           autoSelectUpgradesForDelinquents();
           resetRound();
         } else if (gamePhase === Phase.PODIUM) {
-          resetGame();
+          killMatchAndReturnAllToLobby();
         }
       }
     }
@@ -2869,7 +2929,7 @@ function gameTick() {
   }
 
   // 8. ── Estado Periódico (Envia pickups v6 para os clientes!) ──
-  if (tickCount % BROADCAST_EVERY === 0 && players.size > 0) {
+  if (tickCount % BROADCAST_EVERY === 0 && wss.clients.size > 0) {
     broadcast({
       type: 'gameState',
       players: [...players.values()].map(serializePlayer),

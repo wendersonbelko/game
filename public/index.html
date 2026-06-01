@@ -20,14 +20,46 @@
       </h1>
       <p class="game-subtitle">OVERCHARGE HUNT — EVITE A INFECÇÃO</p>
 
-      <div class="join-box">
-        <label for="nameInput">SEU CODINOME</label>
-        <input type="text" id="nameInput" maxlength="16" placeholder="Ex: NeonRunner" autocomplete="off" spellcheck="false">
+      <div class="lobby-columns">
+        <div class="join-box">
+          <label for="nameInput">SEU CODINOME</label>
+          <input type="text" id="nameInput" maxlength="16" placeholder="Ex: NeonRunner" autocomplete="off" spellcheck="false">
 
-        <label class="color-label">ESCOLHA SUA COR</label>
-        <div id="colorPicker" class="color-picker"></div>
+          <label class="color-label">ESCOLHA SUA COR</label>
+          <div id="colorPicker" class="color-picker"></div>
 
-        <button id="joinBtn">ENTRAR NA ARENA</button>
+          <button id="joinBtn">ENTRAR NA ARENA</button>
+        </div>
+
+        <div id="lobbyServerStatus" class="lobby-status-panel">
+          <div class="status-header">
+            <span class="status-indicator-dot"></span>
+            <span class="status-title">ARENA MULTIPLAYER</span>
+            <span class="status-badge" id="lobbyStatusBadge">CONECTANDO...</span>
+          </div>
+
+          <div class="status-grid">
+            <div class="status-item">
+              <span class="status-item-label">GLADIADORES</span>
+              <span id="lobbyPlayersCount" class="status-item-value">0</span>
+            </div>
+            <div class="status-item">
+              <span class="status-item-label">ONDA DO TORNEIO</span>
+              <span id="lobbyWavesInfo" class="status-item-value">—</span>
+            </div>
+          </div>
+
+          <div class="status-waves-progress-container">
+            <div class="status-waves-progress-bar" id="lobbyWavesProgressBar"></div>
+          </div>
+
+          <div class="status-ranking-section">
+            <div class="status-ranking-title">🏆 TOP 3 LÍDERES</div>
+            <div id="lobbyTop3List" class="lobby-top3-list">
+              <div class="lobby-top3-empty">Tentando obter informações...</div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="instructions">
@@ -46,6 +78,10 @@
           <h4>Tethers</h4>
           <p>Arraste caixas por até 5s para criar barricadas!</p>
         </div>
+      </div>
+
+      <div class="lobby-footer">
+        Desenvolvido por <a href="https://belko.com.br/" target="_blank" rel="noopener noreferrer">Belko</a>
       </div>
     </div>
   </div>
