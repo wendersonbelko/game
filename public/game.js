@@ -37,6 +37,7 @@ const reloadAlert = document.getElementById('reloadAlert');
 const playerListPanel = document.getElementById('playerListPanel');
 const togglePlayerListBtn = document.getElementById('togglePlayerListBtn');
 const playerListContent = document.getElementById('playerListContent');
+const rankListContent = document.getElementById('rankListContent');
 
 const chatArea = document.getElementById('chatArea');
 const chatMessages = document.getElementById('chatMessages');
@@ -61,7 +62,9 @@ let pushables = [];
 let activePickups = []; // Itens Cyberpunk v6
 let activeCoins = [];   // Moedas Cyberpunk v7
 let phase = 'lobby', timer = 0, runnersCount = 0, hotsCount = 0;
+let currentRound = 1;
 let joined = false;
+let upgradeOptions = [];
 let camX = 0, camY = 0, shakeX = 0, shakeY = 0, shakeMag = 0;
 let particles = [];
 let laserBeams = []; // Linhas de laser estéticas `{ sx, sy, ex, ey, life, maxLife, color }`
@@ -383,6 +386,16 @@ window.addEventListener('keydown', e => {
     return;
   }
 
+  // Atalhos de seleção de upgrade rápido (teclas 1 a 3) durante a fase de upgrade
+  if (phase === 'upgrade' && e.key >= '1' && e.key <= '3') {
+    const index = parseInt(e.key) - 1;
+    if (upgradeOptions && upgradeOptions[index]) {
+      selectUpgrade(upgradeOptions[index]);
+    }
+    e.preventDefault();
+    return;
+  }
+
   // Atalhos de compra rápida da Cyber-Loja (teclas 1 a 9)
   if (e.key >= '1' && e.key <= '9') {
     const me = players.get(myId);
@@ -541,7 +554,11 @@ canvas.addEventListener('mouseup', () => {
 // ── WebSocket ──
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  ws = new WebSocket(`${proto}://${location.host}`);
+  let host = location.host;
+  if (!host || location.protocol === 'file:') {
+    host = 'localhost:3001'; // Fallback para desenvolvimento local ao abrir index.html direto
+  }
+  ws = new WebSocket(`${proto}://${host}`);
   ws.onopen = () => {
     console.log('Conectado ao Servidor Único');
     joinBtn.disabled = false;
@@ -569,6 +586,7 @@ function handleMessage(msg) {
       pushables = msg.map.pushables;
       phase = msg.phase;
       timer = msg.timer;
+      currentRound = msg.currentRound || 1;
       activePickups = msg.pickups || []; // Carrega pickups já presentes no mapa
       activeCoins = msg.coins || [];     // Carrega moedas já presentes no mapa
       players.clear();
@@ -582,6 +600,7 @@ function handleMessage(msg) {
 
     case 'gameState':
       phase = msg.phase; timer = msg.timer;
+      currentRound = msg.currentRound || currentRound;
       runnersCount = msg.runnersCount; hotsCount = msg.hotsCount;
       if (msg.pushables) pushables = msg.pushables;
       if (msg.pickups !== undefined) activePickups = msg.pickups; // Captura drops v6!
@@ -606,8 +625,9 @@ function handleMessage(msg) {
       updatePlayerList();
       break;
 
-    case 'phaseChange':
+    case 'phaseChange': {
       phase = msg.phase; timer = msg.timer || 0;
+      currentRound = msg.currentRound || 1;
       if (msg.map) { gameMap = msg.map; pushables = msg.map.pushables; }
       // Limpa pickups ao mudar para lobby/warmup
       if (phase === 'lobby' || phase === 'warmup') {
@@ -618,6 +638,12 @@ function handleMessage(msg) {
       alert10sFired = false;
       endScreen.classList.add('hidden');
       hotSelectScreen.classList.add('hidden');
+      
+      const upM = document.getElementById('upgradeModal');
+      const pdM = document.getElementById('podiumModal');
+      if (upM) upM.classList.add('hidden');
+      if (pdM) pdM.classList.add('hidden');
+
       if (phase === 'ingame') {
         if (msg.hotAlphaIds && msg.hotAlphaIds.length > 0) {
           showHotSelect(msg.hotAlphaIds);
@@ -627,6 +653,7 @@ function handleMessage(msg) {
       }
       updateHUD();
       break;
+    }
 
     case 'playerJoined':
       players.set(msg.player.id, msg.player);
@@ -778,7 +805,183 @@ function handleMessage(msg) {
 
     case 'gameOver':
       showEndScreen(msg.winner);
+      if (msg.nextPhase === 'upgrade') {
+        phase = 'upgrade';
+        timer = 15;
+        updateHUD();
+      }
       break;
+
+    case 'upgradeOffer': {
+      phase = 'upgrade';
+      timer = msg.timer || 15;
+      updateHUD();
+      
+      const upM = document.getElementById('upgradeModal');
+      if (upM) {
+        upM.classList.remove('hidden');
+        document.getElementById('upgradeRoundScore').textContent = msg.roundScore;
+        document.getElementById('upgradeTotalScore').textContent = msg.totalScore;
+        document.getElementById('upgradeTimer').textContent = timer;
+        
+        const optsContainer = document.getElementById('upgradeOptions');
+        optsContainer.innerHTML = '';
+        
+        upgradeOptions = msg.options; 
+        
+        const upgradeDetails = {
+          runner_speed: { icon: '🏃', name: 'Sola de Grafeno', desc: '+5% Velocidade como Runner' },
+          hunter_speed: { icon: '⚡', name: 'Sobrecarga Dinâmica', desc: '+5% Velocidade como Overcharged' },
+          laser_cooldown: { icon: '🔫', name: 'Dissipador Criogênico', desc: '-10% Recarga Arma Laser' },
+          ammo_capacity: { icon: '🔋', name: 'Célula Amplificadora', desc: '+1 Munição Máxima' },
+          runner_stamina: { icon: '🫁', name: 'Pulmão Biônico', desc: '+15% Estamina Máxima' },
+          stamina_regen: { icon: '🌀', name: 'Neuro-Estimulante', desc: '+20% Recarga Estamina' },
+          tether_capacity: { icon: '🧲', name: 'Tether Quântico', desc: '+15% Energia Máxima Tether' },
+          tether_regen: { icon: '🔋', name: 'Condensador Tether', desc: '+20% Recarga Energia Tether' },
+          hunter_hp: { icon: '🛡️', name: 'Placa Reforçada', desc: '+15 HP Máximo como Overcharged' },
+          hunter_still_heal: { icon: '🩹', name: 'Nanomáquinas de Cura', desc: '+25% Cura Parado como Overcharged' },
+          still_heal_delay: { icon: '⏱️', name: 'Ativação Acelerada', desc: '-1s Atraso para Iniciar Cura' },
+          shield_duration: { icon: '🛡️', name: 'Escudo Longa Duração', desc: '+2s Ativação do Plasma Shield' },
+          invisibility_duration: { icon: '👤', name: 'Manto Prolongado', desc: '+2s Duração Camuflagem Chameleon' },
+          overdrive_duration: { icon: '🔥', name: 'Sobrecarga Estendida', desc: '+1.5s Duração do Canhão Overdrive' },
+          vortex_strength: { icon: '🧲', name: 'Gravidade Singular', desc: '+15% Atração Vórtex Magnético' },
+          emp_duration: { icon: '⚡', name: 'Hack de Frequência', desc: '+1s Duração Hack de EMP' },
+          tracker_duration: { icon: '🎯', name: 'Scanner de Retinas', desc: '+2s Mira Neon Lock-On Radar' },
+          gravity_slowness: { icon: '🕸️', name: 'Teias de Fluxo', desc: '+10% Lerdeza Aura Gravitacional' },
+          blink_range: { icon: '🌀', name: 'Hiperespacial', desc: '+20px Alcance Teleporte Blink' },
+          supernova_radius: { icon: '💥', name: 'Nova Estelar', desc: '+20px Raio de Contágio Supernova' },
+          coin_magnet: { icon: '🧲', name: 'Ímã de Fluxo', desc: '+40px Raio Ímã Moedas passivo' },
+          revive_immunity: { icon: '🛡️', name: 'Código Limpo', desc: '+1s Imunidade ao Reviver' }
+        };
+        
+        msg.options.forEach((upId, index) => {
+          const det = upgradeDetails[upId] || { icon: '⚙️', name: 'Upgrade Cyber', desc: 'Aprimoramento do Grid' };
+          const card = document.createElement('div');
+          card.className = 'upgrade-card';
+          card.dataset.id = upId;
+          
+          const keyLabel = document.createElement('span');
+          keyLabel.className = 'upgrade-card-key';
+          keyLabel.textContent = `Atalho [${index + 1}]`;
+          card.appendChild(keyLabel);
+          
+          const icon = document.createElement('div');
+          icon.className = 'upgrade-card-icon';
+          icon.textContent = det.icon;
+          card.appendChild(icon);
+          
+          const title = document.createElement('div');
+          title.className = 'upgrade-card-title';
+          title.textContent = det.name;
+          card.appendChild(title);
+          
+          const desc = document.createElement('div');
+          desc.className = 'upgrade-card-desc';
+          desc.textContent = det.desc;
+          card.appendChild(desc);
+          
+          card.addEventListener('click', () => {
+            selectUpgrade(upId);
+          });
+          
+          optsContainer.appendChild(card);
+        });
+      }
+      break;
+    }
+
+    case 'upgradeRegistered':
+      const cards = document.querySelectorAll('.upgrade-card');
+      cards.forEach(c => {
+        if (c.dataset.id === msg.upgradeId) {
+          c.classList.add('selected');
+        } else {
+          c.style.opacity = '0.3';
+          c.style.pointerEvents = 'none';
+        }
+      });
+      break;
+
+    case 'gameOverPodium': {
+      phase = 'podium';
+      timer = msg.timer || 20;
+      updateHUD();
+      
+      const pdM = document.getElementById('podiumModal');
+      if (pdM) {
+        pdM.classList.remove('hidden');
+        
+        const podiumList = document.getElementById('podiumList');
+        podiumList.innerHTML = '';
+        
+        const leaderboardContainer = document.getElementById('podiumLeaderboard');
+        leaderboardContainer.innerHTML = '';
+        
+        const top3 = msg.leaderboard.slice(0, 3);
+        
+        const o2nd = top3[1];
+        const o1st = top3[0];
+        const o3rd = top3[2];
+        
+        const placesOrder = [
+          { item: o2nd, place: '2nd', badge: '🥈', label: '2º LUGAR' },
+          { item: o1st, place: '1st', badge: '🥇', label: '1º LUGAR' },
+          { item: o3rd, place: '3rd', badge: '🥉', label: '3º LUGAR' }
+        ];
+        
+        placesOrder.forEach(o => {
+          if (o.item) {
+            const pDiv = document.createElement('div');
+            pDiv.className = `podium-place podium-place-${o.place}`;
+            
+            const avatar = document.createElement('div');
+            avatar.className = 'podium-avatar';
+            avatar.textContent = o.item.isBot ? '🤖' : '👤';
+            pDiv.appendChild(avatar);
+            
+            const name = document.createElement('div');
+            name.className = 'podium-name';
+            name.style.color = o.item.color;
+            name.textContent = o.item.name;
+            pDiv.appendChild(name);
+            
+            const score = document.createElement('div');
+            score.className = 'podium-score';
+            score.textContent = `${o.item.score} pts`;
+            pDiv.appendChild(score);
+            
+            const pedestal = document.createElement('div');
+            pedestal.className = 'podium-pedestal';
+            
+            const num = document.createElement('span');
+            num.className = 'podium-pedestal-num';
+            num.textContent = o.badge;
+            pedestal.appendChild(num);
+            
+            pDiv.appendChild(pedestal);
+            podiumList.appendChild(pDiv);
+          }
+        });
+        
+        msg.leaderboard.forEach((item, index) => {
+          const row = document.createElement('div');
+          row.className = 'podium-leaderboard-row';
+          
+          const left = document.createElement('span');
+          left.style.color = item.color;
+          left.textContent = `${index + 1}. ${item.isBot ? '🤖 ' : ''}${item.name}`;
+          row.appendChild(left);
+          
+          const right = document.createElement('span');
+          right.style.fontWeight = 'bold';
+          right.textContent = `${item.score} pts`;
+          row.appendChild(right);
+          
+          leaderboardContainer.appendChild(row);
+        });
+      }
+      break;
+    }
 
     case 'error':
       alert(msg.message);
@@ -817,8 +1020,15 @@ function showLobbyScreen() {
 }
 
 function updateHUD() {
-  const names = { lobby:'AGUARDANDO', warmup:'AQUECIMENTO', ingame:'CAÇADA', endgame:'FIM' };
-  hudPhase.textContent = names[phase] || phase;
+  const names = { 
+    lobby: 'AGUARDANDO', 
+    warmup: `AQUECIMENTO (ONDA ${currentRound}/7)`, 
+    ingame: `SOBRECARGA (ONDA ${currentRound}/7)`, 
+    endgame: 'FIM',
+    upgrade: 'UPGRADE DE REDE',
+    podium: 'PODIUM DA ARENA'
+  };
+  hudPhase.textContent = names[phase] || phase.toUpperCase();
 
   if (phase === 'lobby' && players.size < 3) {
     hudPhase.textContent = `ESPERANDO (${players.size}/3)`;
@@ -840,6 +1050,12 @@ function updateHUD() {
     alert10sFired = true;
     sfx10s.currentTime = 0;
     sfx10s.play().catch(() => {}); // Silencia erros de autoplay
+  }
+
+  // Atualiza o contador de tempo regressivo do modal de upgrade em tempo real
+  const upTimerEl = document.getElementById('upgradeTimer');
+  if (upTimerEl && phase === 'upgrade') {
+    upTimerEl.textContent = timer;
   }
 }
 
@@ -1061,8 +1277,48 @@ function updateShopUI() {
 function updatePlayerList() {
   if (!joined) return;
   playerListContent.innerHTML = '';
+  if (rankListContent) rankListContent.innerHTML = '';
 
-  for (const [, p] of players) {
+  const sortedPlayers = [...players.values()].sort((a, b) => (b.score || 0) - (a.score || 0));
+
+  // 1. Preenche o TOP 5 RANKING na lateral
+  if (rankListContent) {
+    const top5 = sortedPlayers.slice(0, 5);
+    top5.forEach((p, index) => {
+      const row = document.createElement('div');
+      row.className = 'player-row rank-row';
+      row.style.borderLeft = `3px solid ${p.color || '#00f0ff'}`;
+
+      const top = document.createElement('div');
+      top.className = 'player-row-top';
+
+      const rankSpan = document.createElement('span');
+      rankSpan.style.fontWeight = 'bold';
+      rankSpan.style.marginRight = '6px';
+      rankSpan.style.color = index === 0 ? '#ffcc00' : index === 1 ? '#00f0ff' : index === 2 ? '#ff007f' : '#8844ff';
+      rankSpan.textContent = `${index + 1}º`;
+      top.appendChild(rankSpan);
+
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'player-row-name';
+      nameSpan.style.color = p.color;
+      nameSpan.style.flex = '1';
+      nameSpan.textContent = (p.isBot ? '🤖 ' : '') + p.name + (p.id === myId ? ' (Você)' : '');
+      top.appendChild(nameSpan);
+
+      const scoreSpan = document.createElement('span');
+      scoreSpan.style.fontFamily = 'monospace';
+      scoreSpan.style.fontWeight = 'bold';
+      scoreSpan.textContent = `${p.score || 0} pts`;
+      top.appendChild(scoreSpan);
+
+      row.appendChild(top);
+      rankListContent.appendChild(row);
+    });
+  }
+
+  // 2. Preenche o ARENA ACTIVES na lateral
+  for (const p of sortedPlayers) {
     const row = document.createElement('div');
     row.className = 'player-row';
 
@@ -1072,7 +1328,7 @@ function updatePlayerList() {
     const nameSpan = document.createElement('span');
     nameSpan.className = 'player-row-name';
     nameSpan.style.color = p.color;
-    nameSpan.textContent = (p.isBot ? '🤖 ' : '') + p.name + (p.id === myId ? ' (Você)' : '');
+    nameSpan.textContent = (p.isBot ? '🤖 ' : '') + p.name + (p.id === myId ? ' (Você)' : '') + ` [${p.score || 0} pts]`;
     top.appendChild(nameSpan);
 
     const statusSpan = document.createElement('span');
@@ -1096,12 +1352,28 @@ function updatePlayerList() {
       barOuter.className = 'hp-bar-outer';
       const barInner = document.createElement('div');
       barInner.className = 'hp-bar-inner';
-      barInner.style.width = `${p.health || 0}%`;
+      // Ajusta barra de HP baseada em upgrades de HP máximo
+      const maxHP = 100 + (p.upgrades ? (p.upgrades.hunter_hp || 0) * 15 : 0);
+      barInner.style.width = `${((p.health || 0) / maxHP) * 100}%`;
       barOuter.appendChild(barInner);
       row.appendChild(barOuter);
     }
 
     playerListContent.appendChild(row);
+  }
+
+  // 3. Atualiza o HUD principal com a posição (colocação) e pontos do próprio jogador
+  const me = players.get(myId);
+  const myRankIdx = sortedPlayers.findIndex(p => p.id === myId);
+  
+  const rankBadge = document.getElementById('playerRankBadge');
+  const scoreBadge = document.getElementById('playerScoreBadge');
+  if (me && myRankIdx !== -1) {
+    if (rankBadge) rankBadge.textContent = `${myRankIdx + 1}º`;
+    if (scoreBadge) scoreBadge.textContent = `${me.score || 0} pts`;
+  } else {
+    if (rankBadge) rankBadge.textContent = '--';
+    if (scoreBadge) scoreBadge.textContent = '0 pts';
   }
 
   // Só exibe o rodapé de adicionar bots se houver exatamente 1 humano na sala
@@ -1993,6 +2265,22 @@ function gameLoop() {
   updateHudOpacity();
   render();
   requestAnimationFrame(gameLoop);
+}
+
+// ── Funções de Seleção de Habilidades e Fechamento do Pódio ──
+function selectUpgrade(upId) {
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({ type: 'chooseUpgrade', upgradeId: upId }));
+  }
+}
+
+// Fechamento local do pódio final
+const podiumCloseBtn = document.getElementById('podiumCloseBtn');
+if (podiumCloseBtn) {
+  podiumCloseBtn.addEventListener('click', () => {
+    const pdM = document.getElementById('podiumModal');
+    if (pdM) pdM.classList.add('hidden');
+  });
 }
 
 connect();

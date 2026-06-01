@@ -36,7 +36,7 @@ const INFECTION_RADIUS = PLAYER_SIZE + 2;
 const GRAB_RANGE = 70;
 const DRAG_SPEED = 4.5;
 
-const Phase = { LOBBY: 'lobby', WARMUP: 'warmup', INGAME: 'ingame', ENDGAME: 'endgame' };
+const Phase = { LOBBY: 'lobby', WARMUP: 'warmup', INGAME: 'ingame', ENDGAME: 'endgame', UPGRADE: 'upgrade', PODIUM: 'podium' };
 const PLAYER_COLORS = ['#00f0ff', '#00ff88', '#aa66ff', '#ff66cc', '#ffcc00', '#ff8844', '#66ffcc', '#88aaff'];
 
 // ─── Estado do Servidor Único ───
@@ -48,6 +48,7 @@ let gamePhase = Phase.LOBBY;
 let phaseTimer = 0;
 let tickCount = 0;
 let winner = null;
+let currentRound = 1; // Onda atual do torneio (1 até 7)
 let nextPlayerId = 1;
 
 // Itens Drops v6
@@ -350,6 +351,11 @@ function serializePlayer(p) {
 
     // Imunidade ao Reviver v10.2
     reviveImmunityTimer: p.reviveImmunityTimer || 0,
+
+    // Torneio e Upgrades v14
+    score: p.score || 0,
+    roundScore: p.roundScore || 0,
+    upgrades: p.upgrades || {},
   };
 }
 
@@ -452,7 +458,7 @@ function startInGame() {
     if (hotPlayer) {
       hotPlayer.isHot = true;
       hotPlayer.speed = HOT_SPEED;
-      hotPlayer.health = 100;
+      hotPlayer.health = 100 + (hotPlayer.upgrades ? (hotPlayer.upgrades.hunter_hp || 0) * 15 : 0);
       hotPlayer.machinegunTimer = 0;
       hotPlayer.shieldTimer = 0;
       hotPlayer.invisibilityTimer = 0;
@@ -480,13 +486,189 @@ function startInGame() {
 }
 
 function endGame(win) {
-  gamePhase = Phase.ENDGAME;
-  phaseTimer = ENDGAME_SECS * TICK_RATE;
   winner = win;
-  broadcast({ type: 'gameOver', winner: win });
+
+  // 1. Aplicar bônus finais de fim de rodada
+  if (win === 'runners') {
+    // Sobrevivência de Rodada: Runners que terminaram vivos ganham +100 pontos
+    for (const [, p] of players) {
+      if (!p.isHot && p.alive) {
+        p.roundScore = (p.roundScore || 0) + 100;
+        p.score = (p.score || 0) + 100;
+      }
+    }
+  } else if (win === 'hots') {
+    // Aniquilação do Grid: Overcharged ganham +150 pontos se infectarem todos
+    for (const [, p] of players) {
+      if (p.isHot) {
+        p.roundScore = (p.roundScore || 0) + 150;
+        p.score = (p.score || 0) + 150;
+      }
+    }
+  }
+
+  // 2. Definir a fase subsequente (Se rodada < 7 vai para UPGRADE, se for 7 vai para PODIUM)
+  if (currentRound < 7) {
+    gamePhase = Phase.UPGRADE;
+    phaseTimer = 15 * TICK_RATE; // 15 segundos para escolher upgrades
+
+    // Gerar 3 upgrades aleatórios privados para cada jogador humano
+    const upgradesPool = [
+      'runner_speed', 'hunter_speed', 'laser_cooldown', 'ammo_capacity',
+      'runner_stamina', 'stamina_regen', 'tether_capacity', 'tether_regen',
+      'hunter_hp', 'hunter_still_heal', 'still_heal_delay', 'shield_duration',
+      'invisibility_duration', 'overdrive_duration', 'vortex_strength', 'emp_duration',
+      'tracker_duration', 'gravity_slowness', 'blink_range', 'supernova_radius',
+      'coin_magnet', 'revive_immunity'
+    ];
+
+    for (const [id, p] of players) {
+      p.hasChosenUpgrade = false;
+      if (!p.isBot) {
+        // Misturar upgrades e selecionar 3 distintos
+        const shuffled = [...upgradesPool].sort(() => Math.random() - 0.5);
+        p.offeredUpgrades = shuffled.slice(0, 3);
+        
+        // Envia as opções privadas para o jogador
+        if (p.ws && p.ws.readyState === 1) {
+          p.ws.send(JSON.stringify({
+            type: 'upgradeOffer',
+            options: p.offeredUpgrades,
+            roundScore: p.roundScore || 0,
+            totalScore: p.score || 0,
+            round: currentRound,
+            timer: 15
+          }));
+        }
+      } else {
+        // Bots escolhem após 1.5s automaticamente
+        setTimeout(() => {
+          if (players.has(id)) {
+            const randomUpgrade = upgradesPool[Math.floor(Math.random() * upgradesPool.length)];
+            p.upgrades = p.upgrades || {};
+            p.upgrades[randomUpgrade] = (p.upgrades[randomUpgrade] || 0) + 1;
+            p.hasChosenUpgrade = true;
+          }
+        }, 1500);
+      }
+    }
+
+    broadcast({
+      type: 'gameOver',
+      winner: win,
+      currentRound,
+      nextPhase: 'upgrade',
+      players: [...players.values()].map(serializePlayer)
+    });
+
+  } else {
+    // Onda 7 concluída! Torneio finalizado
+    gamePhase = Phase.PODIUM;
+    phaseTimer = 20 * TICK_RATE; // 20 segundos de pódio holográfico
+
+    // Ordenar ranking final
+    const leaderboard = [...players.values()]
+      .map(p => ({ id: p.id, name: p.name, score: p.score || 0, color: p.color, isBot: !!p.isBot }))
+      .sort((a, b) => b.score - a.score);
+
+    broadcast({
+      type: 'gameOverPodium',
+      winner: win,
+      leaderboard,
+      timer: 20
+    });
+  }
+}
+
+function autoSelectUpgradesForDelinquents() {
+  const upgradesPool = [
+    'runner_speed', 'hunter_speed', 'laser_cooldown', 'ammo_capacity',
+    'runner_stamina', 'stamina_regen', 'tether_capacity', 'tether_regen',
+    'hunter_hp', 'hunter_still_heal', 'still_heal_delay', 'shield_duration',
+    'invisibility_duration', 'overdrive_duration', 'vortex_strength', 'emp_duration',
+    'tracker_duration', 'gravity_slowness', 'blink_range', 'supernova_radius',
+    'coin_magnet', 'revive_immunity'
+  ];
+  for (const [, p] of players) {
+    if (!p.isBot && !p.hasChosenUpgrade) {
+      const upgrade = p.offeredUpgrades && p.offeredUpgrades.length > 0 
+        ? p.offeredUpgrades[Math.floor(Math.random() * p.offeredUpgrades.length)]
+        : upgradesPool[Math.floor(Math.random() * upgradesPool.length)];
+      p.upgrades = p.upgrades || {};
+      p.upgrades[upgrade] = (p.upgrades[upgrade] || 0) + 1;
+      p.hasChosenUpgrade = true;
+    }
+  }
+}
+
+function resetRound() {
+  currentRound++;
+  gamePhase = Phase.WARMUP;
+  phaseTimer = WARMUP_SECS * TICK_RATE;
+  winner = null;
+  pickups = [];
+  pickupSpawnTimer = PICKUP_SPAWN_INTERVAL;
+  coins = [];
+  coinSpawnTimer = COIN_SPAWN_INTERVAL;
+  generateMap();
+
+  for (const [, p] of players) {
+    const spawn = findSpawnPos();
+    p.x = spawn.x; p.y = spawn.y;
+    p.isHot = false;
+    p.speed = RUNNER_SPEED;
+    p.alive = true;
+    p.grabbedBox = null;
+    p.mouseWorld = null;
+
+    // Reset de armas e mecânicas com Upgrades acumulados
+    p.ammo = 3 + (p.upgrades ? (p.upgrades.ammo_capacity || 0) : 0);
+    p.reloadTimer = 0;
+    p.health = 100;
+    p.isStunned = false;
+    p.stunTimer = 0;
+    p.speedDebuffTimer = 0;
+    p.holdEnergy = 300 * (1 + (p.upgrades ? (p.upgrades.tether_capacity || 0) : 0) * 0.15);
+    p.reviveImmunityTimer = 0;
+    p.stillTicks = 0;
+    p.roundScore = 0; // Zera pontuação da rodada atual, mantém total score
+
+    // Reset Buffs v6
+    p.speedBoostTimer = 0;
+    p.machinegunTimer = 0;
+    p.shieldTimer = 0;
+    p.supernovaTimer = 0;
+    p.gravityTimer = 0;
+    p.invisibilityTimer = 0;
+    p.empTimer = 0;
+    p.stamina = 600 * (1 + (p.upgrades ? (p.upgrades.runner_stamina || 0) : 0) * 0.15);
+    p.isSprinting = false;
+    p.overdriveTimer = 0;
+    p.trackerTimer = 0;
+
+    // Reset Slots e Poderes v7
+    p.slotQ = null;
+    p.slotE = null;
+    p.phaseshiftTimer = 0;
+    p.magnetTimer = 0;
+    p.repelTimer = 0;
+
+    // Reset Economia v8
+    p.coins = 0;
+  }
+
+  broadcast({
+    type: 'phaseChange',
+    phase: Phase.WARMUP,
+    timer: WARMUP_SECS,
+    currentRound,
+    map: getMapData(),
+    players: [...players.values()].map(serializePlayer)
+  });
 }
 
 function resetGame() {
+  currentRound = 1;
   gamePhase = Phase.LOBBY;
   phaseTimer = 0; winner = null;
   pickups = [];
@@ -509,6 +691,7 @@ function resetGame() {
     p.speedDebuffTimer = 0;
     p.holdEnergy = 300;
     p.reviveImmunityTimer = 0;
+    p.stillTicks = 0;
 
     // Reset Buffs v6
     p.speedBoostTimer = 0;
@@ -532,6 +715,13 @@ function resetGame() {
 
     // Reset Economia v8
     p.coins = 0;
+
+    // Reset Torneio e Upgrades v14
+    p.score = 0;
+    p.roundScore = 0;
+    p.upgrades = {};
+    p.offeredUpgrades = [];
+    p.hasChosenUpgrade = false;
   }
   broadcast({ type: 'phaseChange', phase: Phase.LOBBY, timer: 0, map: getMapData() });
 
@@ -751,6 +941,10 @@ function performRaycast(currentPlayer, tx, ty, angleOffset = 0, isMachinegun = f
           playerHit.health -= isMachinegun ? 10 : 22.6;
           playerHit.stillTicks = 0; // Reseta cronômetro de cura ao tomar tiro!
 
+          // Runner ganha +20 pontos por acertar Overcharged
+          currentPlayer.roundScore = (currentPlayer.roundScore || 0) + 20;
+          currentPlayer.score = (currentPlayer.score || 0) + 20;
+
           // NOVO: Dropar moeda ao tomar tiro!
           spawnCoinAt(playerHit.x + PLAYER_SIZE / 2, playerHit.y + PLAYER_SIZE / 2);
 
@@ -775,6 +969,26 @@ function performRaycast(currentPlayer, tx, ty, angleOffset = 0, isMachinegun = f
     hitType,
     color: isMachinegun ? '#ffcc00' : currentPlayer.color // Metralhadora atira amarelo ouro!
   });
+}
+
+function getUpgradedTimer(p, type, baseTicks) {
+  if (!p || !p.upgrades) return baseTicks;
+  if (type === 'shield') {
+    return baseTicks + (p.upgrades.shield_duration || 0) * 2 * TICK_RATE;
+  }
+  if (type === 'invisibility') {
+    return baseTicks + (p.upgrades.invisibility_duration || 0) * 2 * TICK_RATE;
+  }
+  if (type === 'emp') {
+    return baseTicks + (p.upgrades.emp_duration || 0) * TICK_RATE;
+  }
+  if (type === 'tracker') {
+    return baseTicks + (p.upgrades.tracker_duration || 0) * 2 * TICK_RATE;
+  }
+  if (type === 'overdrive') {
+    return baseTicks + (p.upgrades.overdrive_duration || 0) * 1.5 * TICK_RATE;
+  }
+  return baseTicks;
 }
 
 // ─── Servidor WebSockets ───
@@ -843,6 +1057,11 @@ wss.on('connection', (ws) => {
 
         // --- Economia v8 ---
         coins: 0,
+
+        // --- Torneio e Upgrades v14 ---
+        score: 0,
+        roundScore: 0,
+        upgrades: {}
       };
 
       players.set(pId, currentPlayer);
@@ -857,6 +1076,7 @@ wss.on('connection', (ws) => {
         colors: PLAYER_COLORS,
         pickups: pickups.map(pk => ({ id: pk.id, x: pk.x, y: pk.y, type: pk.type })),
         coins: coins.map(c => ({ id: c.id, x: c.x, y: c.y })),
+        currentRound: currentRound
       }));
 
       broadcast({ type: 'playerJoined', player: serializePlayer(currentPlayer) });
@@ -894,7 +1114,8 @@ wss.on('connection', (ws) => {
 
       currentPlayer.ammo--;
       if (currentPlayer.ammo <= 0) {
-        currentPlayer.reloadTimer = 5 * TICK_RATE; // 5 segundos de recarga
+        const cdMult = 1 - (currentPlayer.upgrades ? (currentPlayer.upgrades.laser_cooldown || 0) : 0) * 0.10;
+        currentPlayer.reloadTimer = Math.round(5 * TICK_RATE * cdMult); // 5 segundos de recarga
       }
 
       const tx = msg.tx;
@@ -956,8 +1177,10 @@ wss.on('connection', (ws) => {
       if (currentPlayer.isHot) return;
       if (currentPlayer.isStunned) return;
       if (currentPlayer.reloadTimer > 0) return;
-      if (currentPlayer.ammo >= 3) return; // Só recarrega se gastou bala
-      currentPlayer.reloadTimer = 2.5 * TICK_RATE; // 2.5 segundos (metade)
+      const maxAmmo = 3 + (currentPlayer.upgrades ? (currentPlayer.upgrades.ammo_capacity || 0) : 0);
+      if (currentPlayer.ammo >= maxAmmo) return; // Só recarrega se gastou bala
+      const cdMult = 1 - (currentPlayer.upgrades ? (currentPlayer.upgrades.laser_cooldown || 0) : 0) * 0.10;
+      currentPlayer.reloadTimer = Math.round(2.5 * TICK_RATE * cdMult); // 2.5 segundos (metade)
       currentPlayer.ammo = 0; // Desativa tiro durante a recarga
     }
 
@@ -991,12 +1214,12 @@ wss.on('connection', (ws) => {
         }
 
         let len = Math.sqrt(bdx * bdx + bdy * bdy);
-        const dist = 160; // 160px blink
+        const dist = 160 + (currentPlayer.upgrades ? (currentPlayer.upgrades.blink_range || 0) * 20 : 0); // 160px blink + upgrade
         const ux = bdx / len;
         const uy = bdy / len;
 
         let landed = false;
-        // Tenta teleportar de 160px a 0px recuando de 8 em 8px para achar local livre
+        // Tenta teleportar de maxpx a 0px recuando de 8 em 8px para achar local livre
         for (let d = dist; d >= 0; d -= 8) {
           const testX = currentPlayer.x + ux * d;
           const testY = currentPlayer.y + uy * d;
@@ -1020,10 +1243,10 @@ wss.on('connection', (ws) => {
         currentPlayer.machinegunTimer = 15 * TICK_RATE;
         broadcast({ type: 'powerActivated', playerId: currentPlayer.id, powerType: 'machinegun' });
       } else if (powerKey === 'shield') {
-        currentPlayer.shieldTimer = 15 * TICK_RATE;
+        currentPlayer.shieldTimer = getUpgradedTimer(currentPlayer, 'shield', 15 * TICK_RATE);
         broadcast({ type: 'powerActivated', playerId: currentPlayer.id, powerType: 'shield' });
       } else if (powerKey === 'invisibility') {
-        currentPlayer.invisibilityTimer = 10 * TICK_RATE;
+        currentPlayer.invisibilityTimer = getUpgradedTimer(currentPlayer, 'invisibility', 10 * TICK_RATE);
         broadcast({ type: 'powerActivated', playerId: currentPlayer.id, powerType: 'invisibility' });
       } else if (powerKey === 'repel') {
         currentPlayer.repelTimer = 6 * TICK_RATE; // 6 segundos
@@ -1061,17 +1284,37 @@ wss.on('connection', (ws) => {
         if (itemId === 'speed') {
           currentPlayer.speedBoostTimer = 15 * TICK_RATE;
         } else if (itemId === 'tracker') {
-          currentPlayer.trackerTimer = 10 * TICK_RATE;
+          currentPlayer.trackerTimer = getUpgradedTimer(currentPlayer, 'tracker', 10 * TICK_RATE);
         } else if (itemId === 'gravity') {
           currentPlayer.gravityTimer = 12 * TICK_RATE;
         } else if (itemId === 'supernova') {
           currentPlayer.supernovaTimer = 10 * TICK_RATE;
         } else if (itemId === 'emp') {
-          currentPlayer.empTimer = 10 * TICK_RATE;
+          currentPlayer.empTimer = getUpgradedTimer(currentPlayer, 'emp', 10 * TICK_RATE);
         } else if (itemId === 'magnetic') {
           currentPlayer.magnetTimer = 8 * TICK_RATE;
         }
         broadcast({ type: 'itemBought', playerId: currentPlayer.id, itemId, coins: currentPlayer.coins });
+      }
+    }
+
+    if (msg.type === 'chooseUpgrade') {
+      if (currentPlayer.hasChosenUpgrade) return;
+      const upgradeId = msg.upgradeId;
+      if (currentPlayer.offeredUpgrades && currentPlayer.offeredUpgrades.includes(upgradeId)) {
+        currentPlayer.upgrades = currentPlayer.upgrades || {};
+        currentPlayer.upgrades[upgradeId] = (currentPlayer.upgrades[upgradeId] || 0) + 1;
+        currentPlayer.hasChosenUpgrade = true;
+
+        if (currentPlayer.ws && currentPlayer.ws.readyState === 1) {
+          currentPlayer.ws.send(JSON.stringify({ type: 'upgradeRegistered', upgradeId }));
+        }
+
+        const humans = [...players.values()].filter(p => !p.isBot);
+        const allChosen = humans.every(h => h.hasChosenUpgrade);
+        if (allChosen && gamePhase === Phase.UPGRADE) {
+          phaseTimer = 1; 
+        }
       }
     }
 
@@ -1135,7 +1378,12 @@ wss.on('connection', (ws) => {
             phaseshiftTimer: 0,
             magnetTimer: 0,
             repelTimer: 0,
-            coins: 0
+            coins: 0,
+
+            // Torneio e Upgrades v14
+            score: 0,
+            roundScore: 0,
+            upgrades: {}
           };
           players.set(bId, bot);
           broadcast({ type: 'playerJoined', player: serializePlayer(bot) });
@@ -1199,7 +1447,8 @@ function triggerBotShoot(bot, tx, ty) {
 
   bot.ammo--;
   if (bot.ammo <= 0) {
-    bot.reloadTimer = 5 * TICK_RATE;
+    const cdMult = 1 - (bot.upgrades ? (bot.upgrades.laser_cooldown || 0) : 0) * 0.10;
+    bot.reloadTimer = Math.round(5 * TICK_RATE * cdMult);
   }
 
   if (bot.machinegunTimer > 0) {
@@ -1436,11 +1685,11 @@ function tryBotBuy(p) {
       const item = affordable[Math.floor(Math.random() * Math.min(2, affordable.length))];
       p.coins -= item.price;
       if (item.id === 'speed') p.speedBoostTimer = 15 * TICK_RATE;
-      else if (item.id === 'tracker') p.trackerTimer = 10 * TICK_RATE;
+      else if (item.id === 'tracker') p.trackerTimer = getUpgradedTimer(p, 'tracker', 10 * TICK_RATE);
       else if (item.id === 'gravity') p.gravityTimer = 12 * TICK_RATE;
       else if (item.id === 'magnetic') p.magnetTimer = 8 * TICK_RATE;
       else if (item.id === 'supernova') p.supernovaTimer = 10 * TICK_RATE;
-      else if (item.id === 'emp') p.empTimer = 10 * TICK_RATE;
+      else if (item.id === 'emp') p.empTimer = getUpgradedTimer(p, 'emp', 10 * TICK_RATE);
       broadcast({ type: 'itemBought', playerId: p.id, itemId: item.id, coins: p.coins });
       ai.buyCooldown = 2 * TICK_RATE;
     }
@@ -1494,7 +1743,8 @@ function tryActivatePowers(p, hot, dist) {
       const bl = Math.sqrt(bx * bx + by * by);
       if (bl > 0) {
         const ux = bx / bl, uy = by / bl;
-        for (let d = 160; d >= 0; d -= 8) {
+        const maxDist = 160 + (p.upgrades ? (p.upgrades.blink_range || 0) * 20 : 0);
+        for (let d = maxDist; d >= 0; d -= 8) {
           const tx = Math.max(TILE, Math.min(MAP_W - TILE - p.w, p.x + ux * d));
           const ty = Math.max(TILE, Math.min(MAP_H - TILE - p.h, p.y + uy * d));
           if (!collidesWithWalls(tx, ty, p.w, p.h) && !collidesWithBoxes(tx, ty, p.w, p.h, -1)) {
@@ -1991,7 +2241,7 @@ function gameTick() {
   tickCount++;
 
   // 1. Cronômetro das fases
-  if (gamePhase === Phase.WARMUP || gamePhase === Phase.INGAME || gamePhase === Phase.ENDGAME) {
+  if (gamePhase === Phase.WARMUP || gamePhase === Phase.INGAME || gamePhase === Phase.ENDGAME || gamePhase === Phase.UPGRADE || gamePhase === Phase.PODIUM) {
     if (phaseTimer > 0) {
       phaseTimer--;
       if (phaseTimer <= 0) {
@@ -2001,7 +2251,22 @@ function gameTick() {
           endGame('runners'); // Fim do tempo = corredores vencem!
         } else if (gamePhase === Phase.ENDGAME) {
           resetGame();
+        } else if (gamePhase === Phase.UPGRADE) {
+          autoSelectUpgradesForDelinquents();
+          resetRound();
+        } else if (gamePhase === Phase.PODIUM) {
+          resetGame();
         }
+      }
+    }
+  }
+
+  // 1.5. Pontuação periódica: +1 ponto por segundo para corredores vivos
+  if (gamePhase === Phase.INGAME && tickCount % TICK_RATE === 0) {
+    for (const [, p] of players) {
+      if (!p.isHot && p.alive) {
+        p.roundScore = (p.roundScore || 0) + 1;
+        p.score = (p.score || 0) + 1;
       }
     }
   }
@@ -2031,7 +2296,7 @@ function gameTick() {
     if (p.reloadTimer > 0) {
       p.reloadTimer--;
       if (p.reloadTimer === 0) {
-        p.ammo = 3;
+        p.ammo = 3 + (p.upgrades ? (p.upgrades.ammo_capacity || 0) : 0);
       }
     }
 
@@ -2040,21 +2305,27 @@ function gameTick() {
       p.stunTimer--;
       if (p.stunTimer <= 0) {
         p.isStunned = false;
-        p.health = 100; // Recupera totalmente o sangue
-        p.reviveImmunityTimer = 3 * TICK_RATE; // 3 segundos de imunidade infinita ao reviver!
+        const maxHealth = 100 + (p.upgrades ? (p.upgrades.hunter_hp || 0) * 15 : 0);
+        p.health = maxHealth; // Recupera totalmente o sangue
+        const immunitySecs = 3 + (p.upgrades ? (p.upgrades.revive_immunity || 0) : 0);
+        p.reviveImmunityTimer = immunitySecs * TICK_RATE; // Imunidade ao reviver!
       }
     }
 
     // 2.5. Cura de Caçadores (Hots) ao ficar parado (3s início, 10s para encher 100%)
-    if (p.isHot && !p.isStunned && p.health < 100) {
+    const maxHP = 100 + (p.upgrades ? (p.upgrades.hunter_hp || 0) * 15 : 0);
+    if (p.isHot && !p.isStunned && p.health < maxHP) {
       const isMoving = p.input.up || p.input.down || p.input.left || p.input.right;
       if (isMoving) {
         p.stillTicks = 0;
       } else {
         p.stillTicks = (p.stillTicks || 0) + 1;
-        if (p.stillTicks >= 3 * TICK_RATE) {
+        const delaySecs = Math.max(1, 3 - (p.upgrades ? (p.upgrades.still_heal_delay || 0) : 0));
+        if (p.stillTicks >= delaySecs * TICK_RATE) {
           // Cura proporcional a 10 HP por segundo = (10 / TICK_RATE) por tick
-          p.health = Math.min(100, p.health + 10 / TICK_RATE);
+          let cureRate = 10 / TICK_RATE;
+          cureRate *= (1 + (p.upgrades ? (p.upgrades.hunter_still_heal || 0) : 0) * 0.25);
+          p.health = Math.min(maxHP, p.health + cureRate);
         }
       }
     } else {
@@ -2077,10 +2348,12 @@ function gameTick() {
         p.mouseWorld = null;
       }
     } else {
-      if (p.holdEnergy < 300) {
+      const maxEnergy = 300 * (1 + (p.upgrades ? (p.upgrades.tether_capacity || 0) : 0) * 0.15);
+      if (p.holdEnergy < maxEnergy) {
         // Hots recarregam a barra 2x mais rápido que corredores
-        p.holdEnergy += p.isHot ? 2 : 1;
-        if (p.holdEnergy > 300) p.holdEnergy = 300;
+        let regen = p.isHot ? 2 : 1;
+        regen *= (1 + (p.upgrades ? (p.upgrades.tether_regen || 0) : 0) * 0.20);
+        p.holdEnergy = Math.min(maxEnergy, p.holdEnergy + regen);
       }
     }
 
@@ -2116,8 +2389,10 @@ function gameTick() {
         p.isSprinting = false;
       }
     } else {
-      // Recarga proporcional de estamina (15 segundos para carregar do 0 ao máximo de 600)
-      p.stamina = Math.min(600, p.stamina + 600 / (15 * TICK_RATE));
+      const maxStamina = 600 * (1 + (p.upgrades ? (p.upgrades.runner_stamina || 0) : 0) * 0.15);
+      let regenAmount = 600 / (15 * TICK_RATE);
+      regenAmount *= (1 + (p.upgrades ? (p.upgrades.stamina_regen || 0) : 0) * 0.20);
+      p.stamina = Math.min(maxStamina, p.stamina + regenAmount);
       p.isSprinting = false;
     }
   }
@@ -2148,10 +2423,10 @@ function gameTick() {
             p.gravityTimer = 12 * TICK_RATE;
             collected = true;
           } else if (pickup.type === 'emp') {
-            p.empTimer = 10 * TICK_RATE;
+            p.empTimer = getUpgradedTimer(p, 'emp', 10 * TICK_RATE);
             collected = true;
           } else if (pickup.type === 'tracker') {
-            p.trackerTimer = 10 * TICK_RATE;
+            p.trackerTimer = getUpgradedTimer(p, 'tracker', 10 * TICK_RATE);
             collected = true;
           } else if (pickup.type === 'magnetic') {
             p.magnetTimer = 8 * TICK_RATE;
@@ -2185,9 +2460,27 @@ function gameTick() {
     }
   }
 
-  // 4b. Detecção de Coleta de Moedas v7
+  // 4b. Detecção de Coleta de Moedas v7 e Ímã de Moedas v14
   for (let i = coins.length - 1; i >= 0; i--) {
     const coin = coins[i];
+    
+    // Magnetismo passivo de Células de Energia
+    for (const [, p] of players) {
+      if (p.isStunned) continue;
+      const px = p.x + PLAYER_SIZE / 2;
+      const py = p.y + PLAYER_SIZE / 2;
+      const cx = coin.x + 8;
+      const cy = coin.y + 8;
+      const dist = Math.sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy));
+      
+      const magnetLevel = p.upgrades ? (p.upgrades.coin_magnet || 0) : 0;
+      if (magnetLevel > 0 && dist <= magnetLevel * 40 && dist > 18) {
+        coin.x += ((px - cx) / dist) * 4;
+        coin.y += ((py - cy) / dist) * 4;
+      }
+    }
+
+    // Colisão de coleta
     for (const [, p] of players) {
       if (p.isStunned) continue;
       const px = p.x + PLAYER_SIZE / 2;
@@ -2198,6 +2491,8 @@ function gameTick() {
 
       if (dist < 22) { // Colisão!
         p.coins = (p.coins || 0) + 1;
+        p.roundScore = (p.roundScore || 0) + 10;
+        p.score = (p.score || 0) + 10;
 
         broadcast({
           type: 'coinCollected',
@@ -2225,7 +2520,9 @@ function gameTick() {
     if (p.input.right) dx += 1;
     if (dx !== 0 && dy !== 0) { dx *= 0.707; dy *= 0.707; }
 
-    let speed = p.isHot ? HOT_SPEED : RUNNER_SPEED;
+    let speed = p.isHot 
+      ? HOT_SPEED * (1 + (p.upgrades ? (p.upgrades.hunter_speed || 0) : 0) * 0.05)
+      : RUNNER_SPEED * (1 + (p.upgrades ? (p.upgrades.runner_speed || 0) : 0) * 0.05);
 
     // Zonas de velocidade
     const pcx = p.x + p.w / 2, pcy = p.y + p.h / 2;
@@ -2259,20 +2556,21 @@ function gameTick() {
     }
     // Aura de Gravidade (Corredor lento por 60% perto de Hot com Teia)
     if (!p.isHot) {
-      let underGravity = false;
+      let gravityFactor = 1.0;
       for (const [, p2] of players) {
         if (p2.isHot && p2.gravityTimer > 0) {
           const gdx = (p2.x + p2.w / 2) - (p.x + p.w / 2);
           const gdy = (p2.y + p2.h / 2) - (p.y + p.h / 2);
           const gdist = Math.sqrt(gdx * gdx + gdy * gdy);
           if (gdist <= 160) {
-            underGravity = true;
-            break;
+            const slownessUpgrade = p2.upgrades ? (p2.upgrades.gravity_slowness || 0) : 0;
+            const factor = Math.max(0.1, 0.4 - slownessUpgrade * 0.10);
+            if (factor < gravityFactor) gravityFactor = factor;
           }
         }
       }
-      if (underGravity) {
-        speed *= 0.4;
+      if (gravityFactor < 1.0) {
+        speed *= gravityFactor;
       }
 
       // Pulso Cyber EMP (Corredor perto de Hot com EMP ativo perde arma e tether)
@@ -2306,7 +2604,8 @@ function gameTick() {
           const mdy = (p2.y + PLAYER_SIZE / 2) - (p.y + PLAYER_SIZE / 2);
           const mdist = Math.sqrt(mdx * mdx + mdy * mdy);
           if (mdist > 0 && mdist <= 240) {
-            const pullStrength = 2.8 * (1 - mdist / 240); // Força diminui com a distância
+            const magnetUpgrade = p2.upgrades ? (p2.upgrades.vortex_strength || 0) : 0;
+            const pullStrength = 2.8 * (1 + magnetUpgrade * 0.15) * (1 - mdist / 240); // Força diminui com a distância
             fx += (mdx / mdist) * pullStrength;
             fy += (mdy / mdist) * pullStrength;
           }
@@ -2444,7 +2743,9 @@ function gameTick() {
         const dy = (hot.y + hot.h / 2) - (runner.y + runner.h / 2);
 
         let infRad = INFECTION_RADIUS;
-        if (hot.supernovaTimer > 0) infRad += 25; // Supernova aumenta raio de contágio!
+        if (hot.supernovaTimer > 0) {
+          infRad += 25 + (hot.upgrades ? (hot.upgrades.supernova_radius || 0) * 20 : 0); // Supernova aumenta raio de contágio + upgrade!
+        }
 
         if (Math.sqrt(dx * dx + dy * dy) < infRad) {
           // Se o corredor tiver escudo de plasma ativo, absorve e empurra o pegador
@@ -2468,6 +2769,10 @@ function gameTick() {
               hot.y = targetHotY;
             }
 
+            // Overcharged ganha +15 pontos por causar impacto que estourou o escudo
+            hot.roundScore = (hot.roundScore || 0) + 15;
+            hot.score = (hot.score || 0) + 15;
+
             broadcast({
               type: 'shieldPopped',
               runnerId: runner.id,
@@ -2479,10 +2784,15 @@ function gameTick() {
             // Contamina normalmente e limpa buffs exclusivos de corredor
             runner.isHot = true;
             runner.speed = HOT_SPEED;
-            runner.health = 100;
+            runner.health = 100 + (runner.upgrades ? (runner.upgrades.hunter_hp || 0) * 15 : 0);
             runner.machinegunTimer = 0;
             runner.shieldTimer = 0;
             runner.invisibilityTimer = 0;
+
+            // Overcharged ganha +50 pontos por infectar corredor
+            hot.roundScore = (hot.roundScore || 0) + 50;
+            hot.score = (hot.score || 0) + 50;
+
             broadcast({
               type: 'infected',
               playerId: runner.id,
@@ -2508,7 +2818,8 @@ function gameTick() {
       runnersCount: [...players.values()].filter(p => !p.isHot).length,
       hotsCount: [...players.values()].filter(p => p.isHot).length,
       pickups: pickups.map(pk => ({ id: pk.id, x: pk.x, y: pk.y, type: pk.type })), // Envia os drops ativos
-      coins: coins.map(c => ({ id: c.id, x: c.x, y: c.y })) // Envia as moedas ativas
+      coins: coins.map(c => ({ id: c.id, x: c.x, y: c.y })), // Envia as moedas ativas
+      currentRound: currentRound
     });
   }
 }

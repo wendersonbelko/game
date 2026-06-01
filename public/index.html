@@ -76,6 +76,13 @@
     <div id="hudTop">
       <div id="hudPhase">LOBBY</div>
       <div id="hudTimer">--:--</div>
+      
+      <!-- Novo: Pontos e Posição do Jogador -->
+      <div id="hudPlayerRank" class="hud-player-rank">
+        <span id="playerRankBadge" class="rank-badge">--</span>
+        <span id="playerScoreBadge" class="rank-score">0 pts</span>
+      </div>
+
       <div id="hudScore">
         <span id="hudRunners" class="hud-runners">🏃 0</span>
         <span class="hud-vs">VS</span>
@@ -133,6 +140,13 @@
 
   <!-- PAINEL DE JOGADORES (Novo na v5) -->
   <div id="playerListPanel" class="player-list-panel hidden">
+    <!-- TOP 5 RANKING -->
+    <div class="panel-header rank-header">
+      <span>🏆 TOP 5 RANKING</span>
+    </div>
+    <div id="rankListContent" class="panel-content rank-content"></div>
+
+    <!-- ARENA ACTIVES -->
     <div class="panel-header">
       <span>🌐 ARENA ACTIVES</span>
       <button id="togglePlayerListBtn" class="toggle-panel-btn">[-]</button>
@@ -194,6 +208,44 @@
         <button id="confirmBotsBtn" class="bots-confirm-btn" disabled>CONFIRMAR</button>
         <button id="closeBotsBtn" class="bots-close-btn">AGORA NÃO</button>
       </div>
+    </div>
+  </div>
+
+  <!-- MODAL DE UPGRADE (Novo na v14) -->
+  <div id="upgradeModal" class="upgrade-modal hidden">
+    <div class="upgrade-modal-content">
+      <h2>⚡ SOBRECARGA DETECTADA ⚡</h2>
+      <h3>REPARANDO O SISTEMA: SELECIONE UM UPGRADE EM <span id="upgradeTimer">15</span>s</h3>
+      
+      <div class="upgrade-stats-banner">
+        <span>Sua Pontuação na Rodada: <strong id="upgradeRoundScore" style="color: var(--neon-cyan);">0</strong> pts</span>
+        <span style="margin: 0 15px; opacity: 0.3;">|</span>
+        <span>Pontuação Acumulada: <strong id="upgradeTotalScore" style="color: var(--neon-magenta);">0</strong> pts</span>
+      </div>
+
+      <div id="upgradeOptions" class="upgrade-options">
+        <!-- Injetado dinamicamente: 3 cards de upgrade -->
+      </div>
+      <p class="upgrade-help-text">Você também pode pressionar as teclas <strong>[1]</strong>, <strong>[2]</strong> ou <strong>[3]</strong> para escolher instantaneamente!</p>
+    </div>
+  </div>
+
+  <!-- MODAL DE PÓDIO FINAL (Novo na v14) -->
+  <div id="podiumModal" class="podium-modal hidden">
+    <div class="podium-modal-content">
+      <h2>🏆 GRIDRUN FINALIZADO 🏆</h2>
+      <h3>CLASSIFICAÇÃO GERAL DOS GLADIADORES</h3>
+      
+      <div id="podiumList" class="podium-list">
+        <!-- Renderiza os 3 primeiros colocados em colunas com Ouro, Prata, Bronze -->
+      </div>
+      
+      <div class="podium-scoreboard-title">RANKING GERAL DA ARENA</div>
+      <div id="podiumLeaderboard" class="podium-leaderboard">
+        <!-- Renderiza a lista de todos os jogadores e suas pontuações -->
+      </div>
+      
+      <button id="podiumCloseBtn" class="podium-close-btn">VOLTAR PARA O LOBBY</button>
     </div>
   </div>
 
