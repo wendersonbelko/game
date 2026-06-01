@@ -1,0 +1,1 @@
+{"version":3,"file":"HttpServer.d.ts","sourceRoot":"","sources":["../../../src/infrastructure/http/HttpServer.ts"],"names":[],"mappings":"AACA,OAAO,IAAI,MAAM,MAAM,CAAC;AAIxB;;GAEG;AACH,qBAAa,UAAU;IACrB,QAAQ,CAAC,GAAG,8CAAc;IAC1B,QAAQ,CAAC,MAAM,EAAE,IAAI,CAAC,MAAM,CAAC;;IAO7B,MAAM,IAAI,IAAI;CAKf"}

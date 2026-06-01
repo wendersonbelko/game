@@ -1,0 +1,26 @@
+export declare const PORT: number;
+export declare const TICK_RATE = 60;
+export declare const TICK_MS: number;
+export declare const BROADCAST_EVERY = 3;
+export declare const TILE = 40;
+export declare const MAP_W = 2720;
+export declare const MAP_H = 2000;
+export declare const PLAYER_SIZE = 28;
+export declare const RUNNER_SPEED = 3;
+export declare const HOT_SPEED = 3.3;
+export declare const WARMUP_SECS = 20;
+export declare const GAME_SECS = 120;
+export declare const ENDGAME_SECS = 8;
+export declare const MIN_PLAYERS_TO_START = 3;
+export declare const MAX_PLAYERS = 20;
+export declare const INFECTION_RADIUS: number;
+export declare const GRAB_RANGE = 70;
+export declare const DRAG_SPEED = 4.5;
+export declare const PICKUP_SPAWN_INTERVAL: number;
+export declare const MAX_PICKUPS = 10;
+export declare const COIN_SPAWN_INTERVAL: number;
+export declare const MAX_COINS = 15;
+export declare const PLAYER_COLORS: readonly string[];
+export declare const PICKUP_TYPES: readonly string[];
+export declare const UPGRADES_POOL: readonly string[];
+//# sourceMappingURL=constants.d.ts.map
