@@ -48,6 +48,18 @@ export function updateHUD() {
   // Upgrade timer
   const upTimerEl = document.getElementById('upgradeTimer');
   if (upTimerEl && phase === 'upgrade') upTimerEl.textContent = timer;
+
+  // Temporizador da tela de fim de jogo (endScreen)
+  const endSubEl = document.querySelector('#endScreen .end-sub');
+  if (endSubEl) {
+    if (phase === 'upgrade') {
+      endSubEl.textContent = `REINICIANDO A RODADA EM ${timer}s...`;
+    } else if (phase === 'podium') {
+      endSubEl.textContent = `REINICIANDO A ARENA EM ${timer}s...`;
+    } else {
+      endSubEl.textContent = 'Reiniciando a rodada em breve...';
+    }
+  }
 }
 
 // ── Weapon HUD ────────────────────────────────────────────────────────────────

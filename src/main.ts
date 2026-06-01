@@ -72,6 +72,13 @@ wss.on('connection', (ws) => {
 
 // ─── 8. Game Loop ─────────────────────────────────────────────────────────────
 function gameTick(): void {
+  // ── Verificação de Sessão com apenas Bots ──
+  const humans = [...state.players.values()].filter(p => !p.isBot);
+  if (humans.length === 0 && state.gamePhase !== GamePhase.LOBBY) {
+    sessionSvc.killMatchAndReturnAllToLobby();
+    return;
+  }
+
   state.tickCount++;
 
   // Decrementa introFreezeTimer
