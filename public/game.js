@@ -1007,10 +1007,31 @@ function handleMessage(msg) {
       break;
     }
 
+    case 'afkWarning': {
+      const overlay = document.getElementById('afkWarningOverlay');
+      const timerEl = document.getElementById('afkCountdown');
+      if (overlay && timerEl) {
+        overlay.classList.remove('hidden');
+        timerEl.textContent = msg.timeLeft;
+      }
+      break;
+    }
+
+    case 'afkWarningReset': {
+      const overlay = document.getElementById('afkWarningOverlay');
+      if (overlay) overlay.classList.add('hidden');
+      break;
+    }
+
     case 'kickToLobby': {
       showLobbyScreen();
       const pdM = document.getElementById('podiumModal');
       if (pdM) pdM.classList.add('hidden');
+      const afkOverlay = document.getElementById('afkWarningOverlay');
+      if (afkOverlay) afkOverlay.classList.add('hidden');
+      if (msg.reason) {
+        alert(msg.reason);
+      }
       break;
     }
 

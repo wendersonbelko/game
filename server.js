@@ -360,6 +360,17 @@ function serializePlayer(p) {
   };
 }
 
+function resetPlayerActivity(p) {
+  if (!p) return;
+  p.idleTicks = 0;
+  if (p.afkWarningTimer && p.afkWarningTimer > 0) {
+    p.afkWarningTimer = 0;
+    if (p.ws && p.ws.readyState === 1) {
+      p.ws.send(JSON.stringify({ type: 'afkWarningReset' }));
+    }
+  }
+}
+
 function getMapData() {
   return {
     w: MAP_W, h: MAP_H, tile: TILE, walls,
@@ -1119,7 +1130,11 @@ wss.on('connection', (ws) => {
         // --- Torneio e Upgrades v14 ---
         score: 0,
         roundScore: 0,
-        upgrades: {}
+        upgrades: {},
+
+        // --- Inatividade (AFK) ---
+        idleTicks: 0,
+        afkWarningTimer: 0
       };
 
       players.set(pId, currentPlayer);
@@ -1155,6 +1170,11 @@ wss.on('connection', (ws) => {
 
     if (!currentPlayer) return;
 
+    // Monitoramento central de atividades e ações
+    if (['shoot', 'grab', 'drag', 'release', 'reload', 'activatePower', 'buyItem', 'chooseUpgrade', 'chat'].includes(msg.type)) {
+      resetPlayerActivity(currentPlayer);
+    }
+
     const isFrozen = (gamePhase !== Phase.INGAME && gamePhase !== Phase.WARMUP) || (gamePhase === Phase.INGAME && introFreezeTimer > 0);
     if (isFrozen) {
       currentPlayer.input.up = false;
@@ -1168,11 +1188,27 @@ wss.on('connection', (ws) => {
     }
 
     if (msg.type === 'input') {
+      const isMoving = !!msg.up || !!msg.down || !!msg.left || !!msg.right || !!msg.shift;
+      let mouseMoved = false;
+      if (msg.mouseWorld && currentPlayer.mouseWorld) {
+        const dx = msg.mouseWorld.x - currentPlayer.mouseWorld.x;
+        const dy = msg.mouseWorld.y - currentPlayer.mouseWorld.y;
+        if (dx * dx + dy * dy > 1.5) { // mouse se moveu levemente
+          mouseMoved = true;
+        }
+      }
+      if (isMoving || mouseMoved) {
+        resetPlayerActivity(currentPlayer);
+      }
+
       currentPlayer.input.up = !!msg.up;
       currentPlayer.input.down = !!msg.down;
       currentPlayer.input.left = !!msg.left;
       currentPlayer.input.right = !!msg.right;
       currentPlayer.input.shift = !!msg.shift;
+      if (msg.mouseWorld) {
+        currentPlayer.mouseWorld = msg.mouseWorld;
+      }
     }
 
     // ── ATIRAR COM ARMA (Mecânica v5 + Metralhadora v6) ──
@@ -2346,6 +2382,61 @@ function smartWander(p, env, radius) {
 // ─── Loop Principal da Física (60 FPS) ───
 function gameTick() {
   tickCount++;
+
+  // ── Verificação de Sessão com apenas Bots ──
+  const humans = [...players.values()].filter(p => !p.isBot);
+  if (humans.length === 0 && gamePhase !== Phase.LOBBY) {
+    killMatchAndReturnAllToLobby();
+    return;
+  }
+
+  // ── Verificação de Inatividade (AFK) ──
+  if (gamePhase !== Phase.LOBBY) {
+    for (const [, p] of players) {
+      if (p.isBot) continue;
+
+      p.idleTicks = (p.idleTicks || 0) + 1;
+      
+      // 5 minutos = 300 segundos = 300 * TICK_RATE
+      const IDLE_LIMIT_TICKS = 300 * TICK_RATE; 
+
+      if (p.idleTicks >= IDLE_LIMIT_TICKS) {
+        if (!p.afkWarningTimer) {
+          p.afkWarningTimer = 60 * TICK_RATE;
+        }
+
+        p.afkWarningTimer--;
+
+        if (p.afkWarningTimer % TICK_RATE === 0) {
+          const secsLeft = Math.ceil(p.afkWarningTimer / TICK_RATE);
+          if (p.ws && p.ws.readyState === 1) {
+            p.ws.send(JSON.stringify({ type: 'afkWarning', timeLeft: secsLeft }));
+          }
+        }
+
+        if (p.afkWarningTimer <= 0) {
+          if (p.ws && p.ws.readyState === 1) {
+            p.ws.send(JSON.stringify({ 
+              type: 'kickToLobby', 
+              reason: 'Você foi desconectado por inatividade.' 
+            }));
+          }
+          
+          const id = p.id;
+          players.delete(id);
+          broadcast({ type: 'playerLeft', id });
+
+          if (players.size === 0) {
+            resetGame();
+          } else if (players.size < MIN_PLAYERS_TO_START && gamePhase !== Phase.LOBBY) {
+            resetGame();
+          } else {
+            checkWinConditions();
+          }
+        }
+      }
+    }
+  }
 
   const isFrozen = (gamePhase !== Phase.INGAME && gamePhase !== Phase.WARMUP) || (gamePhase === Phase.INGAME && introFreezeTimer > 0);
 
